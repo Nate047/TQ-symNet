@@ -1,6 +1,7 @@
 """Official Sym image classifier on a strictly frozen detection backbone."""
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +10,33 @@ from torch import nn
 from torch.utils.data import Dataset
 
 CLASS_NAMES = ('Healthy', 'Sick non-TB', 'TB')
+
+
+def image_class_from_filename(filename):
+    """Match Sym's published image labels, without scanning parent directories.
+
+    External negative cases are Healthy (0), not Sick non-TB (1).
+    MC/Shenzhen use the final _0/_1; DA/DB use an n/p filename prefix.
+    """
+    name = filename.replace('\\', '/')
+    directory = name.split('/')[0].lower()
+    if directory in ('health', 'healthy'):
+        return 0
+    if directory == 'sick':
+        return 1
+    if directory == 'tb':
+        return 2
+    parts = name.split('/')
+    if len(parts) == 4 and parts[0].lower() == 'extra' and parts[2] in ('train', 'val', 'test'):
+        if parts[1] == 'mc+shenzhen':
+            match = re.fullmatch(r'(?:CHNCXR|MCUCXR)_\d+_([01])\.png', parts[3])
+            if match:
+                return 2 * int(match.group(1))
+        elif parts[1] == 'da+db':
+            match = re.fullmatch(r'([np])x?\d+\.(?:png|jpg)', parts[3])
+            if match:
+                return 2 if match.group(1) == 'p' else 0
+    raise ValueError('Unknown image label for %s; expected official TBX11K or extra filename' % filename)
 
 
 def official_sym_classifier(channels=576):
@@ -108,19 +136,29 @@ class TBXImageDataset(Dataset):
             raise ValueError('Duplicate image IDs or filenames in ' + str(annotation))
         if not self.images:
             raise ValueError('Empty image index: ' + str(annotation))
-        self.labels = []
+        self.labels = [image_class_from_filename(name) if labeled else -1 for name in self.filenames]
+
+    def source_counts(self):
+        counts = {}
+        for name, label in zip(self.filenames, self.labels):
+            parts = name.split('/')
+            source = parts[1] if parts[0] == 'extra' else 'TBX11K'
+            entry = counts.setdefault(source, dict(images=0, class_counts=[0, 0, 0]))
+            entry['images'] += 1
+            if label >= 0:
+                entry['class_counts'][label] += 1
+        return counts
+
+    def validate_image_files(self):
+        """Fail before training on missing/empty files; never silently skip data."""
+        invalid = []
         for name in self.filenames:
-            directory = name.split('/')[0].lower()
-            if not labeled:
-                self.labels.append(-1)
-            elif directory in ('health', 'healthy'):
-                self.labels.append(0)
-            elif directory == 'sick':
-                self.labels.append(1)
-            elif directory == 'tb':
-                self.labels.append(2)
-            else:
-                raise ValueError('Unknown image label for %s; use the original full TBX11K split' % name)
+            path = self.image_root / name
+            if not path.is_file() or path.stat().st_size == 0:
+                invalid.append(name)
+        if invalid:
+            raise ValueError('%s: %d missing/empty images, examples=%s' %
+                             (self.annotation, len(invalid), invalid[:10]))
 
     def __len__(self):
         return len(self.images)

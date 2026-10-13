@@ -3,30 +3,35 @@
 分类器结构与Sym公开实现一致，仅将首层输入通道设为TransNeXt的576。
 Backbone保持eval/no_grad/参数冻结，只训练分类器。SGD lr=.001、momentum=.9、weight decay=.0001，12epoch，batch8，warmup500，LR step8/11；CE权重Healthy/Sick/TB=1/1/4。
 
-分类数据使用TBX11K_train.json（6600）和TBX11K_val.json（1800）；不使用带288张extra的all_train/all_val。数据集保留无bbox图像，标签由明确的health/sick/tb目录生成。
+分类训练使用官方数据包的all_train.json（6888张，含288张extra），验证使用all_val.json（2088张，含288张extra）。不合并all_trainval训练，保留val挑选最佳模型；这与官方最终trainval合并训练不同，不能称为完全相同训练条件。
+数据集保留无bbox图像。TBX11K标签按health/sick/tb目录生成；MC/Shenzhen按CHNCXR/MCUCXR文件名末尾_0/_1映射Healthy/TB；DA/DB按n/p前缀映射Healthy/TB。外部负例不标为Sick。未知路径明确报错，绝不默认猜标签。
+启动时检查train/val/test文件名不重叠，记录各来源的类别数量、标注哈希到日志和data_audit.json。仅用test索引做重叠检查，不使用test预测或标签选模型。
+训练启动前拒绝缺失/零字节图片，绝不跳过样本改变划分。若检查失败，修复官方图片文件后再训练，不删除相应JSON记录。
 每轮验证报告Accuracy、TB AUC、Sensitivity、Specificity、macro AP/Recall和混淆矩阵；按验证TB AUC保存best_cls_auc.pth。每轮记录backbone哈希并断言没有梯度和权重/持久buffer变化。
 
 默认加载此前已确认的M2第13轮checkpoint，它与冻结A0的主干相同。若改用A0完整checkpoint，可用--backbone-checkpoint指定，仅加载backbone.*，严格检查主干参数及重建的位置buffer。
 
 ## 迁移
 
-在服务器TQ_SymNet根目录覆盖/新增：
+本次在服务器TQ_SymNet根目录覆盖/新增：
 - TQ_SymNet/classification.py
 - configs/classification/c0_backbone_sym.py
 - tools/train_classification.py
-- tools/export_classification.py
-- tools/export_online.py
-- tools/package_online.py
-- configs/test_online.py
-- tools/check_structure.py
+- tools/check_classification_data.py
+- RUN_CLASSIFICATION.md
+
+数据目录需已有annotations/json/all_train.json、all_val.json、all_test.json，以及imgs/extra/da+db和imgs/extra/mc+shenzhen（沿用官方划分，不生成新JSON）。已有导出工具不改。
 
 ## 训练
 
 ```bash
 cd /home/data2/LiYingxian/TQ_SymNet
+python tools/check_classification_data.py \
+  --json-dir /home/data2/LiYingxian/Dataset_TB/TBX11K/annotations/json \
+  --image-root /home/data2/LiYingxian/Dataset_TB/TBX11K/imgs
 CUDA_VISIBLE_DEVICES=0 python tools/train_classification.py \
   configs/classification/c0_backbone_sym.py \
-  --seed 0 --deterministic --work-dir work_dirs/cls_backbone_sym_s0
+  --seed 0 --deterministic --work-dir work_dirs/cls_backbone_sym_extra_s0
 ```
 
 不改主检测器、质量网络或检测checkpoint文件。新增分类权重单独保存；不会在已有latest.pth的work-dir覆盖训练。
@@ -38,7 +43,7 @@ TXT为3302行Healthy/Sick/TB概率，按all_test.json的images顺序。JSON是CO
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python tools/export_classification.py \
-  work_dirs/cls_backbone_sym_s0/best_cls_auc.pth \
+  work_dirs/cls_backbone_sym_extra_s0/best_cls_auc.pth \
   --out work_dirs/online_test/TQSymNet.txt
 
 CUDA_VISIBLE_DEVICES=0 python tools/export_online.py \

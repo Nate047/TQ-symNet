@@ -82,9 +82,30 @@ def main():
         handler.setFormatter(fmt)
         logger.addHandler(handler)
     train, val = dataset(cfg, 'train', True), dataset(cfg, 'val', False)
-    overlap = set(train.filenames) & set(val.filenames)
-    if overlap:
-        raise ValueError('Train/val filename overlap: %s' % sorted(overlap)[:10])
+    train.validate_image_files()
+    val.validate_image_files()
+    # Inspect the hidden-test index for overlap only; never load its GT/images
+    # or use its predictions to select a training epoch.
+    test_index = TBXImageDataset(cfg.data.test_annotation, cfg.data.image_root, labeled=False)
+    if len(test_index) != cfg.data.expected_test_images:
+        raise ValueError('Unexpected hidden-test image count: %d' % len(test_index))
+    if json.loads(Path(cfg.data.test_annotation).read_text(encoding='utf-8')).get('annotations'):
+        raise ValueError('Expected hidden-test image index without GT')
+    indices = {'train': set(train.filenames), 'val': set(val.filenames), 'test': set(test_index.filenames)}
+    for left, right in (('train', 'val'), ('train', 'test'), ('val', 'test')):
+        overlap = indices[left] & indices[right]
+        if overlap:
+            raise ValueError('%s/%s filename overlap: %s' % (left, right, sorted(overlap)[:10]))
+    data_audit = {
+        split: dict(annotation=str(path), sha256=file_sha256(path),
+                    images=len(data), sources=data.source_counts())
+        for split, path, data in (
+            ('train', cfg.data.train_annotation, train),
+            ('val', cfg.data.val_annotation, val),
+            ('test', cfg.data.test_annotation, test_index))}
+    (out / 'data_audit.json').write_text(json.dumps(data_audit, indent=2), encoding='utf-8')
+    logger.info('[CLS-DATA-AUDIT] filenameDisjoint=True trainOnly=True selectionSplit=val '
+                'selectionMetric=%s hiddenTest=exportOnly audit=%s', cfg.selection_metric, data_audit)
     generators = [torch.Generator().manual_seed(args.seed + offset) for offset in (0, 1)]
     loaders = [DataLoader(data, batch_size=size, shuffle=shuffle, num_workers=cfg.data.workers,
                           pin_memory=True, worker_init_fn=seed_worker, generator=generator)
@@ -155,6 +176,7 @@ def main():
                         config=cfg.to_dict(), epoch=epoch+1, seed=args.seed, metrics=metrics,
                         backbone_checkpoint=str(cfg.backbone_checkpoint), backbone_checkpoint_sha256=source_hash,
                         backbone_state_sha256=frozen_hash, class_names=CLASS_NAMES,
+                        data_audit=data_audit, selection_metric=cfg.selection_metric,
                         optimizer=optimizer.state_dict(), updates=steps)
         torch.save(snapshot, out / 'latest.pth')
         key = metrics[cfg.selection_metric]
