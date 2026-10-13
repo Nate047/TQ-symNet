@@ -1,0 +1,203 @@
+{
+  "annotation_modes": {
+    "single_tb": "train_tb.json/val_tb.json/test_tb.json map all boxes to TB=1",
+    "subtype": "train.json/val.json/test.json preserve Active=1 and Obsolete=2"
+  },
+  "assignment": "Within each image stratum, sort keyed SHA256(seed, stratum, canonical filename).",
+  "experiment_policy": "Train each detector from generic pretraining on its train split; choose checkpoints on val; evaluate test only after settings are fixed.",
+  "original_coordinates_ids_and_area_preserved": true,
+  "protocol": "tbx11k-479-120-200-stratified-sha256-v1",
+  "quotas": {
+    "active_only": [
+      378,
+      94,
+      158
+    ],
+    "mixed": [
+      18,
+      5,
+      7
+    ],
+    "obsolete_only": [
+      83,
+      21,
+      35
+    ]
+  },
+  "seeds": [
+    0,
+    999,
+    2022
+  ],
+  "seeds_summary": {
+    "0": {
+      "test": {
+        "annotation_categories": {
+          "1": 239,
+          "2": 61
+        },
+        "area_bins": {
+          "large": 220,
+          "medium": 78,
+          "small": 2
+        },
+        "boxes": 300,
+        "image_strata": {
+          "active_only": 158,
+          "mixed": 7,
+          "obsolete_only": 35
+        },
+        "images": 200
+      },
+      "train": {
+        "annotation_categories": {
+          "1": 586,
+          "2": 142
+        },
+        "area_bins": {
+          "large": 526,
+          "medium": 196,
+          "small": 6
+        },
+        "boxes": 728,
+        "image_strata": {
+          "active_only": 378,
+          "mixed": 18,
+          "obsolete_only": 83
+        },
+        "images": 479
+      },
+      "val": {
+        "annotation_categories": {
+          "1": 147,
+          "2": 36
+        },
+        "area_bins": {
+          "large": 142,
+          "medium": 41
+        },
+        "boxes": 183,
+        "image_strata": {
+          "active_only": 94,
+          "mixed": 5,
+          "obsolete_only": 21
+        },
+        "images": 120
+      }
+    },
+    "2022": {
+      "test": {
+        "annotation_categories": {
+          "1": 244,
+          "2": 61
+        },
+        "area_bins": {
+          "large": 230,
+          "medium": 73,
+          "small": 2
+        },
+        "boxes": 305,
+        "image_strata": {
+          "active_only": 158,
+          "mixed": 7,
+          "obsolete_only": 35
+        },
+        "images": 200
+      },
+      "train": {
+        "annotation_categories": {
+          "1": 582,
+          "2": 140
+        },
+        "area_bins": {
+          "large": 525,
+          "medium": 193,
+          "small": 4
+        },
+        "boxes": 722,
+        "image_strata": {
+          "active_only": 378,
+          "mixed": 18,
+          "obsolete_only": 83
+        },
+        "images": 479
+      },
+      "val": {
+        "annotation_categories": {
+          "1": 146,
+          "2": 38
+        },
+        "area_bins": {
+          "large": 133,
+          "medium": 49,
+          "small": 2
+        },
+        "boxes": 184,
+        "image_strata": {
+          "active_only": 94,
+          "mixed": 5,
+          "obsolete_only": 21
+        },
+        "images": 120
+      }
+    },
+    "999": {
+      "test": {
+        "annotation_categories": {
+          "1": 241,
+          "2": 54
+        },
+        "area_bins": {
+          "large": 212,
+          "medium": 80,
+          "small": 3
+        },
+        "boxes": 295,
+        "image_strata": {
+          "active_only": 158,
+          "mixed": 7,
+          "obsolete_only": 35
+        },
+        "images": 200
+      },
+      "train": {
+        "annotation_categories": {
+          "1": 587,
+          "2": 147
+        },
+        "area_bins": {
+          "large": 544,
+          "medium": 185,
+          "small": 5
+        },
+        "boxes": 734,
+        "image_strata": {
+          "active_only": 378,
+          "mixed": 18,
+          "obsolete_only": 83
+        },
+        "images": 479
+      },
+      "val": {
+        "annotation_categories": {
+          "1": 144,
+          "2": 38
+        },
+        "area_bins": {
+          "large": 132,
+          "medium": 50
+        },
+        "boxes": 182,
+        "image_strata": {
+          "active_only": 94,
+          "mixed": 5,
+          "obsolete_only": 21
+        },
+        "images": 120
+      }
+    }
+  },
+  "source_boxes": 1211,
+  "source_images": 799,
+  "source_json_sha256": "60bc9b48451ca14ce48c9e05f5c72908cdbb50c02249e66665d944311a506b9e"
+}

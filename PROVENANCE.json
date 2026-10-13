@@ -1,0 +1,95 @@
+{
+  "source": "mmdet/models/utils/NAMLab_att_v3.py",
+  "source_sha256": "d45d6f07f4a823fe9f5d7356edbb399e2ed49cf4cba99ce23b52b9f66d1739f0",
+  "hash_convention": "source_sha256 uses raw bytes; normalized_source_sha256 and quality_sources use UTF-8 LF-normalized text; preserved_core_methods use location-free AST dumps.",
+  "normalized_source_sha256": "8790f3c30467882aeb6584e222c54700fda6a0bb0ccf08ef8c5333176b9cc793",
+  "quality_sources": {
+    "tb_quality_attention.py": "6f5575537f6ab0dc2c356c2c7fd869fbaf17d33c89b27b6794a928c182722e72",
+    "tb_candidate_quality.py": "a3f58438cc77e0c185a812f816753f978c8efce1f5a20c7e3e460483bb96e2ef",
+    "tb_high_quality_selector.py": "0cd4aa9f5f26f70242bf244cead7f2bfcc721fcaf355ffb16d95f882e432cad8",
+    "tb_edge_selector.py": "87aad86988f59d2bd0ace678ccc773cdcfe4366d399967a4501f82a180a97908",
+    "tb_detail_selector.py": "a077f855d4b8226bf8c89a53291699c0df5823ab23f1c563fc77f49629d55880"
+  },
+  "preserved_core_methods": [
+    {
+      "owner": "RetinaNAMGuideAttHeadV3",
+      "method": "__init__",
+      "sha256": "365345d18195ced850605a7713885a1c4a5f8006850adc97643f1c9d99dbcba7"
+    },
+    {
+      "owner": "RetinaNAMGuideAttHeadV3",
+      "method": "_init_layers",
+      "sha256": "aee24e0fb918178f84263a02f19dbd1bf66ab9d51bb3fb8001289bade2eb8953"
+    },
+    {
+      "owner": "RetinaNAMGuideAttHeadV3",
+      "method": "init_weights",
+      "sha256": "026cdec9abd7d5d34fcc281c89a34f4cec5e3b002d4f169eda5797d400043513"
+    },
+    {
+      "owner": "RetinaNAMGuideAttHeadV3",
+      "method": "effective_d_fine_scales",
+      "sha256": "bf35a759f105525e5d5aee53493933ac742b50cc18d86b93235588ef9f8defda"
+    },
+    {
+      "owner": "RetinaNAMGuideAttHeadV3",
+      "method": "_fine_grained_distribution_loss",
+      "sha256": "3e26f99044240676bcb684a7388f03b4a8239af23d65b333d5b20049ffeba11e"
+    },
+    {
+      "owner": "RetinaNAMGuideAttHeadV3",
+      "method": "loss",
+      "sha256": "1cb97849381617086292d3d4c0a4d2f1b859c974d2ebc8b51fb0946c5d816a4a"
+    },
+    {
+      "owner": "RetinaNAMGuideAttHeadV44",
+      "method": "__init__",
+      "sha256": "1f8b8697122fb5f3dcbcf2aec649cc52307c362565573f694ead299be1f0bf6f"
+    },
+    {
+      "owner": "RetinaNAMGuideAttHeadV44",
+      "method": "_reset_sym_reg_adapters",
+      "sha256": "71283b46f8a01d118e3e47b095ed3e4b99514afaa861c53a81ae673974e06bcd"
+    },
+    {
+      "owner": "RetinaNAMGuideAttHeadV44",
+      "method": "init_weights",
+      "sha256": "a7017dd57aeb97a04168f01f86366b97c4dba5abf022ab05072b6c42552a2aa4"
+    },
+    {
+      "owner": "RetinaNAMGuideAttHeadV44",
+      "method": "effective_sym_reg_scales",
+      "sha256": "d0aaeb3980f1041196230142e14f98e1000664f33f9ec37d57e4a431b5bef6ea"
+    },
+    {
+      "owner": "RetinaNAMGuideAttHeadV44",
+      "method": "forward_single",
+      "sha256": "5c0c19040e107a8732300b968633f2b7a7f912f218fc0b3a70d5d7ed7b5e5bde"
+    },
+    {
+      "owner": "RetinaNAMAttV330",
+      "method": "_v330_unwrap_original_images",
+      "sha256": "0a6d1546c65f398addbb92fd9190fbcfb16687c7007542d8a373b9d340f99854"
+    },
+    {
+      "owner": "RetinaNAMAttV330",
+      "method": "_v330_flip_boxes",
+      "sha256": "f1a5da989ff05288407b1775b09347844df10d145d976356c0e6f4504ae94b02"
+    },
+    {
+      "owner": "RetinaNAMAttV330",
+      "method": "_v330_boxes_to_original",
+      "sha256": "a81ba8c097a5b6837e5c626829e2f8443cf39d03d0f519141ff1413c197f8dc7"
+    },
+    {
+      "owner": "RetinaNAMAttV330",
+      "method": "_v330_boxes_from_original",
+      "sha256": "c3fc9b9799b8804411aeb89f662337c201dc7bdfd6ccaf13c86a89d65041cee3"
+    },
+    {
+      "owner": "RetinaNAMAttV330",
+      "method": "_v330_gray_original",
+      "sha256": "0ecbe9c23c8f3a63985dcf7ab7b024b87f34eee341a42aafa03df588ae882b91"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "url": "https://raw.githubusercontent.com/yun-liu/Tuberculosis/main/tools/test.py",
+  "retrieved": "2026-09-28",
+  "sha256": "2163e1f82fb653dcf70cea3be717c435d329ffcb7f34e59fd83172270d796307",
+  "modified": false,
+  "notes": "Author's original script; image-level classification requires a compatible classification model/checkpoint. This script is not the TQ-SymNet classifier."
+}

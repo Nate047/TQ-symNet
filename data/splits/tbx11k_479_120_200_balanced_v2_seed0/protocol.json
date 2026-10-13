@@ -1,0 +1,85 @@
+{
+  "annotation_only": true,
+  "method": "deterministic best pair exchange within subtype strata; at most 250 exchanges",
+  "parent_manifest_sha256": "47ab884aed089d0ca25123826431b2eb7c3aa2abfe487695b1a2fe573097d0b3",
+  "protocol": "tbx11k-479-120-200-geometry-balanced-v2-fixed-test",
+  "quotas": {
+    "active_only": [
+      378,
+      94,
+      158
+    ],
+    "mixed": [
+      18,
+      5,
+      7
+    ],
+    "obsolete_only": [
+      83,
+      21,
+      35
+    ]
+  },
+  "source_boxes": 1211,
+  "source_images": 799,
+  "source_json_sha256": "60bc9b48451ca14ce48c9e05f5c72908cdbb50c02249e66665d944311a506b9e",
+  "split_seed": 0,
+  "summaries": {
+    "test": {
+      "annotation_categories": {
+        "1": 239,
+        "2": 61
+      },
+      "area_bins": {
+        "large": 220,
+        "medium": 78,
+        "small": 2
+      },
+      "boxes": 300,
+      "image_strata": {
+        "active_only": 158,
+        "mixed": 7,
+        "obsolete_only": 35
+      },
+      "images": 200
+    },
+    "train": {
+      "annotation_categories": {
+        "1": 587,
+        "2": 143
+      },
+      "area_bins": {
+        "large": 535,
+        "medium": 190,
+        "small": 5
+      },
+      "boxes": 730,
+      "image_strata": {
+        "active_only": 378,
+        "mixed": 18,
+        "obsolete_only": 83
+      },
+      "images": 479
+    },
+    "val": {
+      "annotation_categories": {
+        "1": 146,
+        "2": 35
+      },
+      "area_bins": {
+        "large": 133,
+        "medium": 47,
+        "small": 1
+      },
+      "boxes": 181,
+      "image_strata": {
+        "active_only": 94,
+        "mixed": 5,
+        "obsolete_only": 21
+      },
+      "images": 120
+    }
+  },
+  "test_membership_preserved": true,
+  "used_predictions_or_AP": false
+}

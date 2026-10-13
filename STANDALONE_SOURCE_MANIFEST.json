@@ -1,0 +1,19 @@
+{
+  "format": 1,
+  "note": "Core source copied byte-identically from current parent project; registration entrypoints intentionally omit automatic legacy NAM imports.",
+  "unchanged_core_sha256": {
+    "mmdet/apis/train.py": "b9ab890ea25fca8c5195258ec4cfc2f59c9273dc20406b3a8236b762d5352e0d",
+    "mmdet/core/hook/ema.py": "255d0d63865735bd2fe661cc1c4f375c68e7834aee0446e27eaaa861c7106663",
+    "mmdet/core/evaluation/eval_hooks.py": "71680e95e4ae644f9723eb75dd2e7ed211b81222bcb3004c384de1ac85007521",
+    "mmdet/datasets/coco.py": "dbb041f0c28ca6546d1d3bc99c4b273903475b33f492886076662b413a245ee1",
+    "mmdet/datasets/tbx11k.py": "13f9b2e5bbbe6328c2f9192dd190687a7f5add1a43ca0c7b586b14f2ed993cfd",
+    "mmdet/datasets/pipelines/cxr_transforms.py": "1acac04c6c070dd2d526382e920704e17cd38c408949b0592bb5f09f96de9bae",
+    "mmdet/models/utils/sym_attention.py": "a88c0b79b434a517019b2d774b2a369faae7c9b3d051cb7ca37b395c6e013782",
+    "mmdet/models/utils/positional_encoding.py": "7455685ca94c3ac4b41173bccfddaf5891ee88ac6e912cc8096fa58fac5202db",
+    "mmdet/utils/deterministic_ops.py": "c3299b006a6585caed20782b82d2b0ee092105a7c19d173743e616c2d0259d38",
+    "mmdet/models/backbones/transnext_cuda.py": "3563a25479f09d19b763944200b76e29d128cc7189cda373b6c00695be056884",
+    "mmdet/models/backbones/p2t.py": "918244677f750a6d85c2c95a0bd0a39506040fdae61abd9cd9fed8d161b0da25",
+    "tools/train.py": "43a24aea6a0a657dfc1871c8352db992e6935cfb9aa35e272d546b45a740edb9",
+    "tools/test.py": "0fcb874193860b5a2e8b026adebed002221e779f6e5a1ccf883444e12437c27e"
+  }
+}

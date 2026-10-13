@@ -1,0 +1,3 @@
+-r requirements/runtime.txt
+# Reuse the server's existing compatible torch/torchvision/mmcv-full/timm and
+# compiled swattention. Do not blindly upgrade them for this packaging change.
