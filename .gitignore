@@ -5,8 +5,15 @@ build/
 dist/
 work_dirs/
 pretrained/
-data/
+data/*
+!data/splits/
 *.pth
 *.pt
 *.so
 *.pyd
+*.zip
+*.tar.gz
+*.log
+.pytest_cache/
+.env
+.env.*
