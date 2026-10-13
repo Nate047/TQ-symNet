@@ -49,6 +49,10 @@ CUDA_VISIBLE_DEVICES=0 python tools/train_classification.py \
 c0为原Sym头，只读取backbone末层；c1冻结并读取完整CrossScale P3/P4/P5，
 比较平均与最大池化；c2使用三类别query分层读取、固定1/3尺度融合；
 c3仅将c2的融合改为每图每类别可学习权重，其融合器初始等于c2。
+分类投影采用逐空间位置的通道LayerNorm。C3尺度编码显式进入尺度门控，
+不加到整层所有Key上；C2/C3共享参数初值和构造后的全局RNG状态相同。
+本修复改变C2/C3分类头参数结构，旧分类头checkpoint不兼容，需用新work-dir从头训练；
+冻结的M2检测checkpoint继续沿用，C0/C1不受影响。
 类别query由整图三分类标签训练，不使用GT框。三个CrossScale头还融合P5全局特征。
 日志中[CLS-READOUT]汇总约九个val批次的类别尺度权重和注意力熵；
 注意力不解释为病灶概率。检测backbone与neck均以eval/no_grad运行，

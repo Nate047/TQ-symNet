@@ -6,6 +6,17 @@ from torch import nn
 from torch.nn import functional as F
 
 
+class _PerPositionLayerNorm(nn.Module):
+    """Normalize channels independently at each spatial location."""
+
+    def __init__(self, channels):
+        super().__init__()
+        self.norm = nn.LayerNorm(channels)
+
+    def forward(self, feature):
+        return self.norm(feature.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
+
+
 class CrossScaleHybridPoolHead(nn.Module):
     """Small control: GAP and GMP on each of P3, P4 and P5."""
 
@@ -43,28 +54,32 @@ class CrossScaleClassQueryHead(nn.Module):
         self.embed_dim = embed_dim
         self.projections = nn.ModuleList([
             nn.Sequential(nn.Conv2d(in_channels, embed_dim, 1),
-                          nn.GroupNorm(1, embed_dim)) for _ in range(3)])
+                          _PerPositionLayerNorm(embed_dim)) for _ in range(3)])
         self.attentions = nn.ModuleList([
             nn.MultiheadAttention(embed_dim, heads, dropout=0., batch_first=True)
             for _ in range(3)])
         self.queries = nn.Parameter(torch.randn(3, embed_dim) * 0.02)
         self.query_norm = nn.LayerNorm(embed_dim)
-        self.level_embeddings = nn.Parameter(torch.zeros(3, embed_dim))
         self.global_projection = nn.Linear(in_channels, embed_dim)
-        if scale_fusion == 'learned':
-            self.scale_gate = nn.Sequential(
-                nn.LayerNorm(2 * embed_dim),
-                nn.Linear(2 * embed_dim, embed_dim), nn.GELU(),
-                nn.Linear(embed_dim, 1))
-            # Identical initial fusion to the fixed-scale control.
-            nn.init.zeros_(self.scale_gate[-1].weight)
-            nn.init.zeros_(self.scale_gate[-1].bias)
-        else:
-            self.scale_gate = None
         self.readout = nn.Sequential(
             nn.LayerNorm(2 * embed_dim),
             nn.Linear(2 * embed_dim, embed_dim), nn.GELU(),
             nn.Dropout(dropout), nn.Linear(embed_dim, 1))
+        # Shared modules are initialized first. Optional gate initialization
+        # must not shift later dropout/RNG draws in the fixed-vs-learned run.
+        if scale_fusion == 'learned':
+            with torch.random.fork_rng(devices=[]):
+                self.level_embeddings = nn.Parameter(torch.randn(3, embed_dim) * 0.02)
+                self.scale_gate = nn.Sequential(
+                    nn.LayerNorm(3 * embed_dim),
+                    nn.Linear(3 * embed_dim, embed_dim), nn.GELU(),
+                    nn.Linear(embed_dim, 1))
+                # Uniform initial gate gives the same output as the control.
+                nn.init.zeros_(self.scale_gate[-1].weight)
+                nn.init.zeros_(self.scale_gate[-1].bias)
+        else:
+            self.register_parameter('level_embeddings', None)
+            self.scale_gate = None
         self.last_debug = {}
         self.collect_debug = False
 
@@ -104,7 +119,6 @@ class CrossScaleClassQueryHead(nn.Module):
             tokens = projected.flatten(2).transpose(1, 2)
             keys = tokens + self._position(h, w, self.embed_dim,
                                            tokens.device, tokens.dtype)
-            keys = keys + self.level_embeddings[level].view(1, 1, -1)
             response, weights = attention(query, keys, tokens,
                                           need_weights=self.collect_debug)
             responses.append(response)
@@ -118,7 +132,11 @@ class CrossScaleClassQueryHead(nn.Module):
             gate = stacked.new_full(stacked.shape[:3], 1. / 3.)
         else:
             context = global_feature[:, None, None].expand_as(stacked)
-            gate = torch.softmax(self.scale_gate(torch.cat([stacked, context], -1)).squeeze(-1), -1)
+            # Scale identity belongs in the gate. Adding a constant vector to
+            # every spatial key cancels in softmax and cannot identify a level.
+            level_identity = self.level_embeddings[None, None].expand_as(stacked)
+            gate_input = torch.cat([stacked, context, level_identity], -1)
+            gate = torch.softmax(self.scale_gate(gate_input).squeeze(-1), -1)
         local = (stacked * gate[..., None]).sum(dim=2)
         global_for_class = global_feature[:, None].expand(-1, 3, -1)
         logits = self.readout(torch.cat([local, global_for_class], dim=-1)).squeeze(-1)
