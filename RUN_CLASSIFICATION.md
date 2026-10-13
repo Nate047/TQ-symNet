@@ -15,9 +15,16 @@ Backbone保持eval/no_grad/参数冻结，只训练分类器。SGD lr=.001、mom
 
 本次在服务器TQ_SymNet根目录覆盖/新增：
 - TQ_SymNet/classification.py
+- TQ_SymNet/classification_heads.py
 - configs/classification/c0_backbone_sym.py
+- configs/classification/c1_crossscale_hybrid_pool.py
+- configs/classification/c2_crossscale_query_fixed.py
+- configs/classification/c3_crossscale_query_adaptive.py
 - tools/train_classification.py
+- tools/export_classification.py
 - tools/check_classification_data.py
+- tools/check_classification_heads.py
+- tools/check_classification_runtime.py
 - RUN_CLASSIFICATION.md
 
 数据目录需已有annotations/json/all_train.json、all_val.json、all_test.json，以及imgs/extra/da+db和imgs/extra/mc+shenzhen（沿用官方划分，不生成新JSON）。已有导出工具不改。
@@ -35,6 +42,34 @@ CUDA_VISIBLE_DEVICES=0 python tools/train_classification.py \
 ```
 
 不改主检测器、质量网络或检测checkpoint文件。新增分类权重单独保存；不会在已有latest.pth的work-dir覆盖训练。
+
+## 冻结CrossScale分类头消融
+
+四组共享同一M2检测checkpoint、all_train/all_val数据、12轮SGD和按val TB AUC选模。
+c0为原Sym头，只读取backbone末层；c1冻结并读取完整CrossScale P3/P4/P5，
+比较平均与最大池化；c2使用三类别query分层读取、固定1/3尺度融合；
+c3仅将c2的融合改为每图每类别可学习权重，其融合器初始等于c2。
+类别query由整图三分类标签训练，不使用GT框。三个CrossScale头还融合P5全局特征。
+日志中[CLS-READOUT]汇总约九个val批次的类别尺度权重和注意力熵；
+注意力不解释为病灶概率。检测backbone与neck均以eval/no_grad运行，
+每轮核对哈希和梯度；导出时重新校验两部分权重与训练时一致。
+
+```bash
+cd /home/data2/LiYingxian/TQ_SymNet
+python tools/check_classification_heads.py
+python tools/check_classification_runtime.py configs/classification/c1_crossscale_hybrid_pool.py
+python tools/check_classification_runtime.py configs/classification/c2_crossscale_query_fixed.py
+python tools/check_classification_runtime.py configs/classification/c3_crossscale_query_adaptive.py
+for GROUP in c0_backbone_sym c1_crossscale_hybrid_pool c2_crossscale_query_fixed c3_crossscale_query_adaptive; do
+  CUDA_VISIBLE_DEVICES=0 python tools/train_classification.py \
+    "configs/classification/${GROUP}.py" --seed 0 --deterministic \
+    --work-dir "work_dirs/cls_${GROUP}_s0" || exit 1
+done
+```
+
+比较best_metrics.json中的Accuracy、TB_AUC、Sensitivity、Specificity和混淆矩阵。
+胜出组使用各自目录的best_cls_auc.pth通过同一个export_classification.py导出3302行test概率。
+该消融验证的是分类读出层，不能把多尺度query的收益归因于上游检测器。
 
 ## 隐藏test导出及打包
 

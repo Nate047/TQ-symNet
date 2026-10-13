@@ -1,0 +1,129 @@
+"""Image classification read-outs for a frozen, detector-trained CrossScale pyramid."""
+import math
+
+import torch
+from torch import nn
+from torch.nn import functional as F
+
+
+class CrossScaleHybridPoolHead(nn.Module):
+    """Small control: GAP and GMP on each of P3, P4 and P5."""
+
+    def __init__(self, in_channels=256, hidden=512, dropout=0.1):
+        super().__init__()
+        self.classifier = nn.Sequential(
+            nn.LayerNorm(6 * in_channels),
+            nn.Linear(6 * in_channels, hidden), nn.GELU(),
+            nn.Dropout(dropout), nn.Linear(hidden, 3))
+        self.last_debug = {}
+        self.collect_debug = False
+
+    def forward(self, pyramid):
+        if len(pyramid) != 4:
+            raise ValueError('Expected frozen CrossScale P2/P3/P4/P5')
+        levels = pyramid[1:]
+        representation = torch.cat(
+            [pool(x, 1).flatten(1) for x in levels
+             for pool in (F.adaptive_avg_pool2d, F.adaptive_max_pool2d)], dim=1)
+        self.last_debug = {'pooled_levels': 3} if self.collect_debug else {}
+        return self.classifier(representation)
+
+
+class CrossScaleClassQueryHead(nn.Module):
+    """Read each level with three class queries, then retain global context."""
+
+    def __init__(self, in_channels=256, embed_dim=128, heads=4,
+                 scale_fusion='fixed', dropout=0.1):
+        super().__init__()
+        if embed_dim <= 0 or embed_dim % heads or embed_dim % 4:
+            raise ValueError('embed_dim must be positive and divisible by heads and four')
+        if scale_fusion not in ('fixed', 'learned'):
+            raise ValueError('scale_fusion must be fixed or learned')
+        self.scale_fusion = scale_fusion
+        self.embed_dim = embed_dim
+        self.projections = nn.ModuleList([
+            nn.Sequential(nn.Conv2d(in_channels, embed_dim, 1),
+                          nn.GroupNorm(1, embed_dim)) for _ in range(3)])
+        self.attentions = nn.ModuleList([
+            nn.MultiheadAttention(embed_dim, heads, dropout=0., batch_first=True)
+            for _ in range(3)])
+        self.queries = nn.Parameter(torch.randn(3, embed_dim) * 0.02)
+        self.query_norm = nn.LayerNorm(embed_dim)
+        self.level_embeddings = nn.Parameter(torch.zeros(3, embed_dim))
+        self.global_projection = nn.Linear(in_channels, embed_dim)
+        if scale_fusion == 'learned':
+            self.scale_gate = nn.Sequential(
+                nn.LayerNorm(2 * embed_dim),
+                nn.Linear(2 * embed_dim, embed_dim), nn.GELU(),
+                nn.Linear(embed_dim, 1))
+            # Identical initial fusion to the fixed-scale control.
+            nn.init.zeros_(self.scale_gate[-1].weight)
+            nn.init.zeros_(self.scale_gate[-1].bias)
+        else:
+            self.scale_gate = None
+        self.readout = nn.Sequential(
+            nn.LayerNorm(2 * embed_dim),
+            nn.Linear(2 * embed_dim, embed_dim), nn.GELU(),
+            nn.Dropout(dropout), nn.Linear(embed_dim, 1))
+        self.last_debug = {}
+        self.collect_debug = False
+
+    @staticmethod
+    def _position(h, w, channels, device, dtype):
+        # Position is computed from the current feature shape, never a fixed
+        # training-grid lookup. Each coordinate gets sine and cosine channels.
+        y = torch.linspace(0., 1., h, device=device, dtype=dtype)
+        x = torch.linspace(0., 1., w, device=device, dtype=dtype)
+        # The explicit indexing argument is unavailable in older server Torch.
+        try:
+            yy, xx = torch.meshgrid(y, x, indexing='ij')
+        except TypeError:
+            yy, xx = torch.meshgrid(y, x)
+        frequencies = torch.arange(channels // 4, device=device, dtype=dtype)
+        frequencies = 2. * math.pi * torch.exp(-math.log(10000.) * frequencies
+                                              / max(channels // 4 - 1, 1))
+        return torch.cat([torch.sin(xx[..., None] * frequencies),
+                          torch.cos(xx[..., None] * frequencies),
+                          torch.sin(yy[..., None] * frequencies),
+                          torch.cos(yy[..., None] * frequencies)], dim=-1).reshape(1, h * w, channels)
+
+    def forward(self, pyramid):
+        if len(pyramid) != 4:
+            raise ValueError('Expected frozen CrossScale P2/P3/P4/P5')
+        selected = pyramid[1:]
+        batch = selected[0].shape[0]
+        global_feature = self.global_projection(selected[-1].mean(dim=(2, 3)))
+        query = self.query_norm(self.queries)[None].expand(batch, -1, -1)
+        responses, entropies = [], []
+        for level, (feature, projection, attention) in enumerate(
+                zip(selected, self.projections, self.attentions)):
+            if feature.shape[0] != batch:
+                raise ValueError('Mismatched CrossScale batch dimensions')
+            projected = projection(feature)
+            h, w = projected.shape[-2:]
+            tokens = projected.flatten(2).transpose(1, 2)
+            keys = tokens + self._position(h, w, self.embed_dim,
+                                           tokens.device, tokens.dtype)
+            keys = keys + self.level_embeddings[level].view(1, 1, -1)
+            response, weights = attention(query, keys, tokens,
+                                          need_weights=self.collect_debug)
+            responses.append(response)
+            if self.collect_debug:
+                with torch.no_grad():
+                    weights = weights.detach().float().clamp_min(1e-8)
+                    entropies.append((-(weights * weights.log()).sum(-1)
+                                      / math.log(max(h * w, 2))).mean(0).cpu().tolist())
+        stacked = torch.stack(responses, dim=2)  # B, three classes, three levels, D
+        if self.scale_gate is None:
+            gate = stacked.new_full(stacked.shape[:3], 1. / 3.)
+        else:
+            context = global_feature[:, None, None].expand_as(stacked)
+            gate = torch.softmax(self.scale_gate(torch.cat([stacked, context], -1)).squeeze(-1), -1)
+        local = (stacked * gate[..., None]).sum(dim=2)
+        global_for_class = global_feature[:, None].expand(-1, 3, -1)
+        logits = self.readout(torch.cat([local, global_for_class], dim=-1)).squeeze(-1)
+        self.last_debug = (
+            {'scale_gate_by_class': gate.detach().mean(0).cpu().tolist(),
+             'attention_entropy_by_level': entropies}
+            if self.collect_debug else {})
+        return logits

@@ -71,29 +71,40 @@ def state_sha256(module):
 
 
 def load_frozen_backbone(backbone_config, checkpoint_path):
+    backbone, _, audit = load_frozen_features(backbone_config, None, checkpoint_path)
+    return backbone, audit
+
+
+def load_frozen_features(backbone_config, neck_config, checkpoint_path):
     from mmcv.runner.checkpoint import _load_checkpoint
-    from mmdet.models import build_backbone
+    from mmdet.models import build_backbone, build_neck
     from TQ_SymNet.checkpoints import load_retained_state
     config = dict(backbone_config)
     config['pretrained'] = None
     config.pop('init_cfg', None)
     holder = nn.Module()
     holder.backbone = build_backbone(config)
+    if neck_config is not None:
+        # Register the standalone project's measured CrossScale implementation.
+        import TQ_SymNet.models  # noqa: F401
+        holder.neck = build_neck(dict(neck_config))
     checkpoint = _load_checkpoint(str(checkpoint_path), map_location='cpu')
     state = checkpoint.get('state_dict', checkpoint)
     selected = {}
     for key, value in state.items():
         name = key[7:] if key.startswith('module.') else key
-        if name.startswith('backbone.'):
+        if name.startswith('backbone.') or (neck_config is not None and name.startswith('neck.')):
             if name in selected:
-                raise ValueError('Duplicate backbone tensor: ' + name)
+                raise ValueError('Duplicate frozen-feature tensor: ' + name)
             selected[name] = value
     if not selected:
         raise ValueError('Expected a detector/TQ checkpoint with backbone.* tensors')
     # Uses the existing audited loading contract, including regenerated caches.
     audit = load_retained_state(holder, selected)
     holder.backbone.requires_grad_(False).eval()
-    return holder.backbone, audit
+    if neck_config is not None:
+        holder.neck.requires_grad_(False).eval()
+    return holder.backbone, getattr(holder, 'neck', None), audit
 
 
 class FrozenBackboneSymClassifier(nn.Module):
@@ -116,6 +127,47 @@ class FrozenBackboneSymClassifier(nn.Module):
             raise ValueError('Unexpected final backbone feature shape: %s' % (tuple(last.shape),))
         # flatten(1) retains the batch axis even for a one-image last batch.
         return self.classifier(last).flatten(1)
+
+
+class FrozenPyramidClassifier(nn.Module):
+    """Separate image classifier with a frozen detection backbone and neck."""
+
+    def __init__(self, backbone, neck, classifier):
+        super().__init__()
+        self.backbone = backbone.requires_grad_(False).eval()
+        self.neck = neck.requires_grad_(False).eval()
+        self.classifier = classifier
+
+    def train(self, mode=True):
+        super().train(mode)
+        self.backbone.eval()
+        self.neck.eval()
+        return self
+
+    def forward(self, images):
+        with torch.no_grad():
+            pyramid = self.neck(self.backbone(images))
+        return self.classifier(pyramid)
+
+
+def build_frozen_classifier(config, checkpoint_path):
+    """Reconstruct the architecture recorded in a classification config."""
+    mode = config.get('classification_head', 'sym')
+    if mode == 'sym':
+        if config.get('neck') is not None:
+            raise ValueError('Sym backbone-only control must not specify a neck')
+        backbone, audit = load_frozen_backbone(config.backbone, checkpoint_path)
+        return FrozenBackboneSymClassifier(backbone, config.input_channels), audit
+    if mode not in ('hybrid_pool', 'class_query'):
+        raise ValueError('Unsupported classification_head: %s' % mode)
+    if config.get('neck') is None:
+        raise ValueError('CrossScale classification requires the exact detector neck config')
+    backbone, neck, audit = load_frozen_features(config.backbone, config.neck, checkpoint_path)
+    from TQ_SymNet.classification_heads import CrossScaleClassQueryHead, CrossScaleHybridPoolHead
+    options = dict(config.classification_options)
+    classifier = (CrossScaleHybridPoolHead(**options) if mode == 'hybrid_pool'
+                  else CrossScaleClassQueryHead(**options))
+    return FrozenPyramidClassifier(backbone, neck, classifier), audit
 
 
 class TBXImageDataset(Dataset):

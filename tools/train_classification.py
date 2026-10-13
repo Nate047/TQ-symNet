@@ -1,4 +1,4 @@
-"""Train only the official Sym image classifier; validate all three image classes."""
+"""Train a classification head on strictly frozen detector features."""
 import argparse
 import json
 import logging
@@ -13,8 +13,8 @@ import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
-from TQ_SymNet.classification import (CLASS_NAMES, FrozenBackboneSymClassifier,
-    TBXImageDataset, classification_metrics, file_sha256, load_frozen_backbone, state_sha256)
+from TQ_SymNet.classification import (CLASS_NAMES, TBXImageDataset,
+    build_frozen_classifier, classification_metrics, file_sha256, state_sha256)
 
 
 def seed_worker(worker_id):
@@ -38,8 +38,12 @@ def dataset(cfg, split, training):
 def evaluate(model, loader, device, criterion):
     model.eval()
     probabilities, labels = [], []
+    debug_samples = []
     total_loss, weight_sum = 0., 0.
-    for images, target, _ in loader:
+    for batch_index, (images, target, _) in enumerate(loader):
+        if hasattr(model.classifier, 'collect_debug'):
+            model.classifier.collect_debug = (batch_index % max(1, len(loader) // 8) == 0
+                                              or batch_index == len(loader) - 1)
         images, target = images.to(device, non_blocking=True), target.to(device, non_blocking=True)
         logits = model(images)
         batch_weight = float(criterion.weight[target].sum())
@@ -47,8 +51,16 @@ def evaluate(model, loader, device, criterion):
         weight_sum += batch_weight
         probabilities.append(logits.softmax(1).cpu().numpy())
         labels.append(target.cpu().numpy())
+        if getattr(model.classifier, 'last_debug', None):
+            debug_samples.append(model.classifier.last_debug)
     result = classification_metrics(np.concatenate(labels), np.concatenate(probabilities))
     result['loss'] = total_loss / weight_sum
+    if debug_samples:
+        result['readout_debug'] = dict(
+            sampled_batches=len(debug_samples),
+            **{key: np.asarray([item[key] for item in debug_samples],
+                               dtype=np.float64).mean(axis=0).tolist()
+               for key in debug_samples[0]})
     return result
 
 
@@ -111,25 +123,31 @@ def main():
                           pin_memory=True, worker_init_fn=seed_worker, generator=generator)
                for data, size, shuffle, generator in zip((train, val),
                    (cfg.data.batch_size, cfg.data.val_batch_size), (True, False), generators)]
-    backbone, audit = load_frozen_backbone(cfg.backbone, cfg.backbone_checkpoint)
-    model = FrozenBackboneSymClassifier(backbone, cfg.input_channels).cuda()
+    model, audit = build_frozen_classifier(cfg, cfg.backbone_checkpoint)
+    model = model.cuda()
     frozen_hash = state_sha256(model.backbone)
+    frozen_neck_hash = (state_sha256(model.neck)
+                        if getattr(model, 'neck', None) is not None else None)
     source_hash = file_sha256(cfg.backbone_checkpoint)
     optimizer = torch.optim.SGD(model.classifier.parameters(), lr=cfg.optimizer.lr,
                                momentum=cfg.optimizer.momentum, weight_decay=cfg.optimizer.weight_decay)
     criterion = nn.CrossEntropyLoss(weight=torch.tensor(cfg.training.class_weights, device='cuda'))
-    logger.info('[CLS-BUILD] officialSymConv=True input=%d hidden=512 backboneFrozen=True '
-                'backboneEval=True AMP=False updates=onePerBatch source=%s audit=%s',
-                cfg.input_channels, cfg.backbone_checkpoint, audit)
+    logger.info('[CLS-BUILD] head=%s backboneFrozen=True neckFrozen=%s '
+                'frozenEval=True AMP=False updates=onePerBatch source=%s audit=%s',
+                cfg.get('classification_head', 'sym'), frozen_neck_hash is not None,
+                cfg.backbone_checkpoint, audit)
     logger.info('[CLS-DATA] train=%d counts=%s val=%d counts=%s classOrder=%s weight=%s',
                 len(train), np.bincount(train.labels, minlength=3).tolist(), len(val),
                 np.bincount(val.labels, minlength=3).tolist(), CLASS_NAMES, cfg.training.class_weights)
-    logger.info('[CLS-FROZEN] initialBackboneSHA256=%s sourceSHA256=%s', frozen_hash, source_hash)
+    logger.info('[CLS-FROZEN] initialBackboneSHA256=%s initialNeckSHA256=%s sourceSHA256=%s',
+                frozen_hash, frozen_neck_hash, source_hash)
     start = time.perf_counter()
     steps, best = 0, float('-inf')
     total_steps = len(loaders[0]) * cfg.training.epochs
     for epoch in range(cfg.training.epochs):
         model.train()
+        if hasattr(model.classifier, 'collect_debug'):
+            model.classifier.collect_debug = False
         loss_sum, weight_sum, correct, seen = 0., 0., 0, 0
         for iteration, (images, target, _) in enumerate(loaders[0], 1):
             lr = cfg.optimizer.lr * cfg.training.lr_gamma ** sum(epoch >= step for step in cfg.training.lr_steps)
@@ -160,10 +178,21 @@ def main():
                             torch.cuda.max_memory_allocated() // 1024**2)
         metrics = evaluate(model, loaders[1], 'cuda', criterion)
         after_hash = state_sha256(model.backbone)
+        after_neck_hash = (state_sha256(model.neck)
+                           if frozen_neck_hash is not None else None)
         if after_hash != frozen_hash or model.backbone.training or any(
                 p.requires_grad or p.grad is not None for p in model.backbone.parameters()):
             raise RuntimeError('Frozen backbone contract violated')
-        logger.info('[CLS-FROZEN] epoch=%d unchanged=True SHA256=%s', epoch+1, after_hash)
+        if frozen_neck_hash is not None and (after_neck_hash != frozen_neck_hash
+                or model.neck.training or any(p.requires_grad or p.grad is not None
+                                              for p in model.neck.parameters())):
+            raise RuntimeError('Frozen CrossScale contract violated')
+        logger.info('[CLS-FROZEN] epoch=%d unchanged=True backboneSHA256=%s neckSHA256=%s',
+                    epoch+1, after_hash, after_neck_hash)
+        debug = metrics.get('readout_debug')
+        if debug:
+            logger.info('[CLS-READOUT] epoch=%d head=%s sampledVal=%s',
+                        epoch+1, cfg.get('classification_head', 'sym'), debug)
         logger.info('[CLS-VAL] epoch=%d Acc=%.5f TB_AUC=%.5f Sensitivity=%.5f Specificity=%.5f '
                     'macroAP=%.5f macroRecall=%.5f loss=%.5f confusion=%s', epoch+1,
                     metrics['accuracy'], metrics['tb_auc'], metrics['tb_sensitivity'],
@@ -176,6 +205,8 @@ def main():
                         config=cfg.to_dict(), epoch=epoch+1, seed=args.seed, metrics=metrics,
                         backbone_checkpoint=str(cfg.backbone_checkpoint), backbone_checkpoint_sha256=source_hash,
                         backbone_state_sha256=frozen_hash, class_names=CLASS_NAMES,
+                        neck_state_sha256=frozen_neck_hash,
+                        classification_head=cfg.get('classification_head', 'sym'),
                         data_audit=data_audit, selection_metric=cfg.selection_metric,
                         optimizer=optimizer.state_dict(), updates=steps)
         torch.save(snapshot, out / 'latest.pth')
