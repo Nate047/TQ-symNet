@@ -9,7 +9,8 @@ from torch import nn
 from torch.nn import functional as F
 from TQ_SymNet.classification import FrozenPyramidClassifier, state_sha256
 from TQ_SymNet.classification_heads import CrossScaleClassQueryHead, CrossScaleHybridPoolHead
-from TQ_SymNet.classification_consistency import brightness_contrast_view, consistency_kl
+from TQ_SymNet.classification_consistency import (
+    brightness_contrast_view, consistency_kl, paired_view_logits)
 
 
 class DummyBackbone(nn.Module):
@@ -124,7 +125,28 @@ def check_consistency_contract():
     loss.backward()
     assert student.grad is not None and student.grad.abs().sum() > 0
     assert teacher.grad is None, 'Reference logits must be stop-gradient'
-    print('PASS: deterministic mild pixel perturbation, student-only consistency gradient')
+    # Raw grayscale must remain grayscale despite channel-specific normalization.
+    raw_gray = torch.rand(3, 1, 8, 8).expand(-1, 3, -1, -1) * 255.
+    mean_tensor = torch.tensor(mean)[None, :, None, None]
+    std_tensor = torch.tensor(std)[None, :, None, None]
+    normalized = (raw_gray - mean_tensor) / std_tensor
+    changed_gray = brightness_contrast_view(normalized, mean, std) * std_tensor + mean_tensor
+    torch.testing.assert_close(changed_gray[:, 0], changed_gray[:, 1], atol=3e-5, rtol=1e-6)
+    torch.testing.assert_close(changed_gray[:, 0], changed_gray[:, 2], atol=3e-5, rtol=1e-6)
+    # A zero image perturbation gives zero disagreement even with dropout, and
+    # the second view must leave the next training iteration's RNG untouched.
+    probe = nn.Sequential(nn.Flatten(), nn.Linear(192, 16), nn.ReLU(),
+                          nn.Dropout(0.5), nn.Linear(16, 3)).train()
+    torch.manual_seed(71)
+    reference = probe(normalized)
+    reference_rng = torch.get_rng_state().clone()
+    torch.manual_seed(71)
+    original, changed = paired_view_logits(
+        probe, normalized, mean, std, 0., 0., torch.Generator().manual_seed(1000074))
+    torch.testing.assert_close(original, reference, atol=0., rtol=0.)
+    torch.testing.assert_close(original, changed, atol=0., rtol=0.)
+    assert torch.equal(reference_rng, torch.get_rng_state()), 'Second view shifts dropout RNG'
+    print('PASS: grayscale intensity perturbation, shared dropout, isolated RNG, student-only KL')
 
 
 def main():
@@ -145,9 +167,16 @@ def main():
     for name, head in variants:
         model = FrozenPyramidClassifier(DummyBackbone(), DummyNeck(), head).train()
         backbone_hash, neck_hash = state_sha256(model.backbone), state_sha256(model.neck)
-        logits = model(image)
+        if name == 'query_temperature':
+            logits, changed_logits = paired_view_logits(
+                model, image, (123.675, 116.28, 103.53), (58.395, 57.12, 57.375),
+                generator=torch.Generator().manual_seed(1000004))
+            extra_loss = .1 * consistency_kl(changed_logits, logits)
+        else:
+            logits = model(image)
+            extra_loss = logits.new_zeros(())
         assert logits.shape == (2, 3) and torch.isfinite(logits).all(), name
-        F.cross_entropy(logits, labels).backward()
+        (F.cross_entropy(logits, labels) + extra_loss).backward()
         assert not model.backbone.training and not model.neck.training, name
         assert all(p.grad is None and not p.requires_grad for p in model.backbone.parameters()), name
         assert all(p.grad is None and not p.requires_grad for p in model.neck.parameters()), name

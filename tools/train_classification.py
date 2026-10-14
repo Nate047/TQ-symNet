@@ -15,7 +15,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 from TQ_SymNet.classification import (CLASS_NAMES, TBXImageDataset,
     build_frozen_classifier, classification_metrics, file_sha256, state_sha256)
-from TQ_SymNet.classification_consistency import brightness_contrast_view, consistency_kl
+from TQ_SymNet.classification_consistency import paired_view_logits, consistency_kl
 
 
 def seed_worker(worker_id):
@@ -137,10 +137,17 @@ def main():
     optimizer = torch.optim.SGD(model.classifier.parameters(), lr=cfg.optimizer.lr,
                                momentum=cfg.optimizer.momentum, weight_decay=cfg.optimizer.weight_decay)
     criterion = nn.CrossEntropyLoss(weight=torch.tensor(cfg.training.class_weights, device='cuda'))
+    consistency_generator = (torch.Generator(device='cuda').manual_seed(args.seed + 1000003)
+                             if consistency_weight else None)
     logger.info('[CLS-BUILD] head=%s backboneFrozen=True neckFrozen=%s '
                 'frozenEval=True AMP=False updates=onePerBatch consistency=%.3f source=%s audit=%s',
                 cfg.get('classification_head', 'sym'), frozen_neck_hash is not None,
                 consistency_weight, cfg.backbone_checkpoint, audit)
+    if consistency_weight:
+        logger.info('[CLS-CONSISTENCY] pixelBrightness=+/-%.2f contrast=+/-%.3f '
+                    'weight=%.3f sharedDropout=True isolatedRNG=True seed=%d',
+                    consistency.brightness_pixels, consistency.contrast,
+                    consistency_weight, args.seed + 1000003)
     logger.info('[CLS-DATA] train=%d counts=%s val=%d counts=%s classOrder=%s weight=%s',
                 len(train), np.bincount(train.labels, minlength=3).tolist(), len(val),
                 np.bincount(val.labels, minlength=3).tolist(), CLASS_NAMES, cfg.training.class_weights)
@@ -163,16 +170,16 @@ def main():
                 group['lr'] = lr
             images, target = images.cuda(non_blocking=True), target.cuda(non_blocking=True)
             optimizer.zero_grad(set_to_none=True)
-            logits = model(images)
-            supervised_loss = criterion(logits, target)
             if consistency_weight:
-                augmented = brightness_contrast_view(
-                    images, cfg.data.mean, cfg.data.std,
+                logits, augmented_logits = paired_view_logits(
+                    model, images, cfg.data.mean, cfg.data.std,
                     brightness_pixels=float(consistency.brightness_pixels),
-                    contrast=float(consistency.contrast))
-                augmented_logits = model(augmented)
+                    contrast=float(consistency.contrast), generator=consistency_generator)
+                supervised_loss = criterion(logits, target)
                 consistency_loss = consistency_kl(augmented_logits, logits)
             else:
+                logits = model(images)
+                supervised_loss = criterion(logits, target)
                 consistency_loss = supervised_loss.new_zeros(())
             loss = supervised_loss + consistency_weight * consistency_loss
             if not torch.isfinite(loss):

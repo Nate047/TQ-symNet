@@ -8,6 +8,7 @@ sys.path.insert(0, str(ROOT))
 import torch
 from torch.nn import functional as F
 from TQ_SymNet.classification import build_frozen_classifier, state_sha256
+from TQ_SymNet.classification_consistency import paired_view_logits, consistency_kl
 
 
 def main():
@@ -27,10 +28,19 @@ def main():
     before_neck = (state_sha256(model.neck)
                    if getattr(model, 'neck', None) is not None else None)
     x = torch.zeros((1, 3, cfg.data.image_size, cfg.data.image_size), device='cuda')
-    logits = model(x)
+    consistency = cfg.get('consistency', None)
+    if consistency is not None and consistency.weight > 0:
+        generator = torch.Generator(device='cuda').manual_seed(1000003)
+        logits, changed_logits = paired_view_logits(
+            model, x, cfg.data.mean, cfg.data.std,
+            consistency.brightness_pixels, consistency.contrast, generator)
+        extra_loss = consistency.weight * consistency_kl(changed_logits, logits)
+    else:
+        logits = model(x)
+        extra_loss = logits.new_zeros(())
     if logits.shape != (1, 3) or not torch.isfinite(logits).all():
         raise RuntimeError('Classifier must return one finite three-class logit vector')
-    F.cross_entropy(logits, torch.tensor([2], device='cuda')).backward()
+    (F.cross_entropy(logits, torch.tensor([2], device='cuda')) + extra_loss).backward()
     if not any(p.grad is not None and torch.isfinite(p.grad).all()
                for p in model.classifier.parameters()):
         raise RuntimeError('Classification head received no finite gradient')
