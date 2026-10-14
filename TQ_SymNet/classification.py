@@ -147,6 +147,8 @@ class FrozenPyramidClassifier(nn.Module):
     def forward(self, images):
         with torch.no_grad():
             pyramid = self.neck(self.backbone(images))
+        if getattr(self.classifier, 'uses_images', False):
+            return self.classifier(pyramid, images=images)
         return self.classifier(pyramid)
 
 
@@ -158,28 +160,35 @@ def build_frozen_classifier(config, checkpoint_path):
             raise ValueError('Sym backbone-only control must not specify a neck')
         backbone, audit = load_frozen_backbone(config.backbone, checkpoint_path)
         return FrozenBackboneSymClassifier(backbone, config.input_channels), audit
-    if mode not in ('hybrid_pool', 'class_query'):
+    if mode not in ('hybrid_pool', 'class_query', 'prior_query'):
         raise ValueError('Unsupported classification_head: %s' % mode)
     if config.get('neck') is None:
         raise ValueError('CrossScale classification requires the exact detector neck config')
     backbone, neck, audit = load_frozen_features(config.backbone, config.neck, checkpoint_path)
     from TQ_SymNet.classification_heads import CrossScaleClassQueryHead, CrossScaleHybridPoolHead
     options = dict(config.classification_options)
-    classifier = (CrossScaleHybridPoolHead(**options) if mode == 'hybrid_pool'
-                  else CrossScaleClassQueryHead(**options))
+    if mode == 'prior_query':
+        from TQ_SymNet.classification_priors import PriorClassQueryHead
+        options['image_mean'], options['image_std'] = config.data.mean, config.data.std
+        classifier = PriorClassQueryHead(**options)
+    else:
+        classifier = (CrossScaleHybridPoolHead(**options) if mode == 'hybrid_pool'
+                      else CrossScaleClassQueryHead(**options))
     return FrozenPyramidClassifier(backbone, neck, classifier), audit
 
 
 class TBXImageDataset(Dataset):
     def __init__(self, annotation, image_root, training=False, labeled=True,
                  image_size=512, mean=(123.675, 116.28, 103.53),
-                 std=(58.395, 57.12, 57.375), flip_probability=.5):
+                 std=(58.395, 57.12, 57.375), flip_probability=.5,
+                 clahe=None):
         self.annotation = str(annotation)
         self.image_root = Path(image_root)
         self.training = training
         self.image_size = image_size
         self.mean, self.std = np.asarray(mean, np.float32), np.asarray(std, np.float32)
         self.flip_probability = flip_probability
+        self.clahe = dict(clahe) if clahe else None
         index = json.loads(Path(annotation).read_text(encoding='utf-8'))
         self.images = index['images']  # Preserve submission index order exactly.
         self.image_ids = [item['id'] for item in self.images]
@@ -224,11 +233,30 @@ class TBXImageDataset(Dataset):
         if image.shape[:2] != (self.image_size, self.image_size):
             raise ValueError('Expected official %dx%d image: %s has %s' %
                              (self.image_size, self.image_size, filename, image.shape))
+        if self.clahe:
+            image = classification_clahe(image, self.clahe)
         if self.training and torch.rand(()).item() < self.flip_probability:
             image = image[:, ::-1].copy()
         image = mmcv.imnormalize(image, self.mean, self.std, to_rgb=True)
         tensor = torch.from_numpy(np.ascontiguousarray(image.transpose(2, 0, 1)))
         return tensor, self.labels[index], index
+
+
+def classification_clahe(image, options):
+    """Deterministic classifier-only BGR luminance CLAHE, before normalization.
+
+    Same preprocessing in train/val/export. No class-dependent augmentation and
+    no change to the detector's image pipeline. Grayscale CXRs stay grayscale.
+    """
+    import cv2
+    clip = float(options.get('clip_limit', 2.))
+    grid = tuple(int(value) for value in options.get('tile_grid_size', (8, 8)))
+    if clip <= 0 or len(grid) != 2 or min(grid) <= 0:
+        raise ValueError('Invalid CLAHE parameters')
+    operation = cv2.createCLAHE(clipLimit=clip, tileGridSize=grid)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    enhanced = operation.apply(gray)
+    return np.repeat(enhanced[:, :, None], 3, axis=2)
 
 
 def classification_metrics(labels, probabilities):

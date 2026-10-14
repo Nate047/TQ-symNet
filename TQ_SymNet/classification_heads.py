@@ -142,7 +142,10 @@ class CrossScaleClassQueryHead(nn.Module):
         output = F.linear(attended, layer.out_proj.weight, layer.out_proj.bias)
         return output, weights.mean(1) if self.collect_debug else None
 
-    def forward(self, pyramid):
+    def enhance_local(self, local, global_feature, pyramid, images):
+        return local, {}
+
+    def forward(self, pyramid, images=None):
         if len(pyramid) != 4:
             raise ValueError('Expected frozen CrossScale P2/P3/P4/P5')
         selected = pyramid[1:]
@@ -189,6 +192,7 @@ class CrossScaleClassQueryHead(nn.Module):
             gate_input = torch.cat([stacked, context, level_identity], -1)
             gate = torch.softmax(self.scale_gate(gate_input).squeeze(-1), -1)
         local = (stacked * gate[..., None]).sum(dim=2)
+        local, branch_debug = self.enhance_local(local, global_feature, pyramid, images)
         global_for_class = global_feature[:, None].expand(-1, 3, -1)
         logits = self.readout(torch.cat([local, global_for_class], dim=-1)).squeeze(-1)
         self.last_debug = (
@@ -198,4 +202,5 @@ class CrossScaleClassQueryHead(nn.Module):
                  temperature.detach().mean(0).cpu().tolist()}
                 if temperature is not None else {})}
             if self.collect_debug else {})
+        self.last_debug.update(branch_debug)
         return logits

@@ -49,7 +49,8 @@ def main():
     if index.get('annotations'):
         raise ValueError('Expected hidden-test image index without GT')
     data = TBXImageDataset(annotation, args.image_root or cfg.data.image_root, training=False, labeled=False,
-                          image_size=cfg.data.image_size, mean=cfg.data.mean, std=cfg.data.std)
+                          image_size=cfg.data.image_size, mean=cfg.data.mean, std=cfg.data.std,
+                          clahe=cfg.data.get('clahe'))
     if len(data) != cfg.data.expected_test_images:
         raise ValueError('Official submission expects %d images, got %d' % (cfg.data.expected_test_images, len(data)))
     loader = DataLoader(data, batch_size=args.batch_size or cfg.data.val_batch_size,

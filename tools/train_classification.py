@@ -28,7 +28,7 @@ def dataset(cfg, split, training):
     data = cfg.data
     result = TBXImageDataset(data[split + '_annotation'], data.image_root, training=training,
                             image_size=data.image_size, mean=data.mean, std=data.std,
-                            flip_probability=data.flip_probability)
+                            flip_probability=data.flip_probability, clahe=data.get('clahe'))
     expected = data.get('expected_' + split + '_images')
     if expected is not None and len(result) != expected:
         raise ValueError('%s split: expected %d images, got %d' % (split, expected, len(result)))
@@ -38,10 +38,10 @@ def dataset(cfg, split, training):
 @torch.no_grad()
 def evaluate(model, loader, device, criterion):
     model.eval()
-    probabilities, labels = [], []
+    probabilities, labels, positions = [], [], []
     debug_samples = []
     total_loss, weight_sum = 0., 0.
-    for batch_index, (images, target, _) in enumerate(loader):
+    for batch_index, (images, target, indices) in enumerate(loader):
         if hasattr(model.classifier, 'collect_debug'):
             model.classifier.collect_debug = (batch_index % max(1, len(loader) // 8) == 0
                                               or batch_index == len(loader) - 1)
@@ -52,9 +52,16 @@ def evaluate(model, loader, device, criterion):
         weight_sum += batch_weight
         probabilities.append(logits.softmax(1).cpu().numpy())
         labels.append(target.cpu().numpy())
+        positions.extend(indices.tolist())
         if getattr(model.classifier, 'last_debug', None):
             debug_samples.append(model.classifier.last_debug)
-    result = classification_metrics(np.concatenate(labels), np.concatenate(probabilities))
+    probabilities, labels = np.concatenate(probabilities), np.concatenate(labels)
+    if positions != list(range(len(loader.dataset))):
+        raise ValueError('Validation output ordering mismatch')
+    result = classification_metrics(labels, probabilities)
+    internal = np.asarray([not name.startswith('extra/') for name in loader.dataset.filenames])
+    if internal.any() and set(labels[internal].tolist()) == {0, 1, 2}:
+        result['tbx11k_only'] = classification_metrics(labels[internal], probabilities[internal])
     result['loss'] = total_loss / weight_sum
     if debug_samples:
         result['readout_debug'] = dict(
@@ -62,7 +69,7 @@ def evaluate(model, loader, device, criterion):
             **{key: np.asarray([item[key] for item in debug_samples],
                                dtype=np.float64).mean(axis=0).tolist()
                for key in debug_samples[0]})
-    return result
+    return result, probabilities
 
 
 def main():
@@ -151,10 +158,13 @@ def main():
     logger.info('[CLS-DATA] train=%d counts=%s val=%d counts=%s classOrder=%s weight=%s',
                 len(train), np.bincount(train.labels, minlength=3).tolist(), len(val),
                 np.bincount(val.labels, minlength=3).tolist(), CLASS_NAMES, cfg.training.class_weights)
+    logger.info('[CLS-PRIORS] options=%s clahe=%s branches=%s',
+                cfg.get('classification_options', {}), cfg.data.get('clahe'),
+                getattr(model.classifier, 'branch_names', []))
     logger.info('[CLS-FROZEN] initialBackboneSHA256=%s initialNeckSHA256=%s sourceSHA256=%s',
                 frozen_hash, frozen_neck_hash, source_hash)
     start = time.perf_counter()
-    steps, best = 0, float('-inf')
+    steps, best, best_accuracy = 0, float('-inf'), float('-inf')
     total_steps = len(loaders[0]) * cfg.training.epochs
     for epoch in range(cfg.training.epochs):
         model.train()
@@ -203,7 +213,7 @@ def main():
                             consistency_sum/weight_sum, correct/seen, steps,
                             elapsed/max(steps, 1)*(total_steps-steps)/60,
                             torch.cuda.max_memory_allocated() // 1024**2)
-        metrics = evaluate(model, loaders[1], 'cuda', criterion)
+        metrics, val_probabilities = evaluate(model, loaders[1], 'cuda', criterion)
         after_hash = state_sha256(model.backbone)
         after_neck_hash = (state_sha256(model.neck)
                            if frozen_neck_hash is not None else None)
@@ -225,6 +235,12 @@ def main():
                     metrics['accuracy'], metrics['tb_auc'], metrics['tb_sensitivity'],
                     metrics['tb_specificity'], metrics['macro_ap'], metrics['macro_recall'],
                     metrics['loss'], metrics['confusion_matrix'])
+        if 'tbx11k_only' in metrics:
+            logger.info('[CLS-VAL-TBX11K] epoch=%d metrics=%s', epoch+1, metrics['tbx11k_only'])
+        # Per-image evidence for TB FN/FP, source shifts and model complementarity.
+        np.savez_compressed(out / ('val_predictions_epoch_%02d.npz' % (epoch+1)),
+                            probabilities=val_probabilities, labels=np.asarray(val.labels),
+                            image_ids=np.asarray(val.image_ids), filenames=np.asarray(val.filenames))
         record = dict(epoch=epoch+1, updates=steps, metrics=metrics, backbone_sha256=after_hash)
         with (out / 'metrics.jsonl').open('a', encoding='utf-8') as stream:
             stream.write(json.dumps(record) + '\n')
@@ -237,6 +253,11 @@ def main():
                         data_audit=data_audit, selection_metric=cfg.selection_metric,
                         optimizer=optimizer.state_dict(), updates=steps)
         torch.save(snapshot, out / 'latest.pth')
+        # Keep Accuracy-best as well as the historical AUC-best; do not silently
+        # change the primary selection policy between old/new ablations.
+        if epoch == 0 or metrics['accuracy'] > best_accuracy:
+            best_accuracy = metrics['accuracy']
+            torch.save(snapshot, out / 'best_cls_accuracy.pth')
         key = metrics[cfg.selection_metric]
         if key > best:
             best = key
