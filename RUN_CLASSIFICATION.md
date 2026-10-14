@@ -16,10 +16,14 @@ Backbone保持eval/no_grad/参数冻结，只训练分类器。SGD lr=.001、mom
 本次在服务器TQ_SymNet根目录覆盖/新增：
 - TQ_SymNet/classification.py
 - TQ_SymNet/classification_heads.py
+- TQ_SymNet/classification_consistency.py
 - configs/classification/c0_backbone_sym.py
 - configs/classification/c1_crossscale_hybrid_pool.py
 - configs/classification/c2_crossscale_query_fixed.py
 - configs/classification/c3_crossscale_query_adaptive.py
+- configs/classification/c4_crossscale_adaptive_temperature.py
+- configs/classification/c5_crossscale_intensity_consistency.py
+- configs/classification/c6_crossscale_temperature_consistency.py
 - tools/train_classification.py
 - tools/export_classification.py
 - tools/check_classification_data.py
@@ -74,6 +78,33 @@ done
 比较best_metrics.json中的Accuracy、TB_AUC、Sensitivity、Specificity和混淆矩阵。
 胜出组使用各自目录的best_cls_auc.pth通过同一个export_classification.py导出3302行test概率。
 该消融验证的是分类读出层，不能把多尺度query的收益归因于上游检测器。
+
+## 下一轮：注意力温度与成像一致性
+
+沿用C3的全冻结架构、同一M2检测权重、all_train/all_val、12轮SGD与val TB AUC选模。
+C4只增加每图/每类别的空间注意力温度，初始温度严格为1，
+和C3共享参数及初始化后全局RNG状态；温度作用在QK注意力分数上，
+不作用在最终三分类Softmax。C5只增加train图像的轻度亮度(±5像素)
+与对比度(±5%)扰动，采用原图预测stop-gradient的KL约束，权重0.1。
+val与test完全使用原始单视图。C6同时增加两者，判断能否叠加。
+这些数值是首轮消融起点，不声称已调到最优；所有组从同一个冻结M2权重
+重新初始化分类头，不加载C3已训练权重。
+日志同时记录原始CE、未乘权的KL、总体loss、每类温度、尺度权重和注意力熵。
+
+```bash
+cd /home/data2/LiYingxian/TQ_SymNet
+python tools/check_classification_heads.py
+for GROUP in c4_crossscale_adaptive_temperature c5_crossscale_intensity_consistency c6_crossscale_temperature_consistency; do
+  CFG="configs/classification/${GROUP}.py"
+  CUDA_VISIBLE_DEVICES=0 python tools/check_classification_runtime.py "$CFG" || exit 1
+  CUDA_VISIBLE_DEVICES=0 python tools/train_classification.py "$CFG" \
+    --seed 0 --deterministic \
+    --work-dir "work_dirs/cls_temp_consistency_seed0/${GROUP}_s0" || exit 1
+done
+```
+
+比较C3及C4/C5/C6的best_metrics.json和epoch9–12均值；不要用test挑选设置。
+分类头权重结构在C4/C6增加了温度分支，须严格匹配本组config导出。
 
 ## 隐藏test导出及打包
 

@@ -15,6 +15,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 from TQ_SymNet.classification import (CLASS_NAMES, TBXImageDataset,
     build_frozen_classifier, classification_metrics, file_sha256, state_sha256)
+from TQ_SymNet.classification_consistency import brightness_contrast_view, consistency_kl
 
 
 def seed_worker(worker_id):
@@ -75,6 +76,10 @@ def main():
     parser.add_argument('--deterministic', action='store_true')
     args = parser.parse_args()
     cfg = Config.fromfile(args.config)
+    consistency = cfg.get('consistency', None)
+    consistency_weight = float(consistency.weight) if consistency is not None else 0.
+    if consistency_weight < 0:
+        raise ValueError('consistency.weight must be non-negative')
     if args.backbone_checkpoint:
         cfg.backbone_checkpoint = args.backbone_checkpoint
     if cfg.optimizer.type != 'SGD':
@@ -133,9 +138,9 @@ def main():
                                momentum=cfg.optimizer.momentum, weight_decay=cfg.optimizer.weight_decay)
     criterion = nn.CrossEntropyLoss(weight=torch.tensor(cfg.training.class_weights, device='cuda'))
     logger.info('[CLS-BUILD] head=%s backboneFrozen=True neckFrozen=%s '
-                'frozenEval=True AMP=False updates=onePerBatch source=%s audit=%s',
+                'frozenEval=True AMP=False updates=onePerBatch consistency=%.3f source=%s audit=%s',
                 cfg.get('classification_head', 'sym'), frozen_neck_hash is not None,
-                cfg.backbone_checkpoint, audit)
+                consistency_weight, cfg.backbone_checkpoint, audit)
     logger.info('[CLS-DATA] train=%d counts=%s val=%d counts=%s classOrder=%s weight=%s',
                 len(train), np.bincount(train.labels, minlength=3).tolist(), len(val),
                 np.bincount(val.labels, minlength=3).tolist(), CLASS_NAMES, cfg.training.class_weights)
@@ -148,7 +153,8 @@ def main():
         model.train()
         if hasattr(model.classifier, 'collect_debug'):
             model.classifier.collect_debug = False
-        loss_sum, weight_sum, correct, seen = 0., 0., 0, 0
+        loss_sum, ce_sum, consistency_sum = 0., 0., 0.
+        weight_sum, correct, seen = 0., 0, 0
         for iteration, (images, target, _) in enumerate(loaders[0], 1):
             lr = cfg.optimizer.lr * cfg.training.lr_gamma ** sum(epoch >= step for step in cfg.training.lr_steps)
             if steps < cfg.training.warmup_iters:
@@ -158,7 +164,17 @@ def main():
             images, target = images.cuda(non_blocking=True), target.cuda(non_blocking=True)
             optimizer.zero_grad(set_to_none=True)
             logits = model(images)
-            loss = criterion(logits, target)
+            supervised_loss = criterion(logits, target)
+            if consistency_weight:
+                augmented = brightness_contrast_view(
+                    images, cfg.data.mean, cfg.data.std,
+                    brightness_pixels=float(consistency.brightness_pixels),
+                    contrast=float(consistency.contrast))
+                augmented_logits = model(augmented)
+                consistency_loss = consistency_kl(augmented_logits, logits)
+            else:
+                consistency_loss = supervised_loss.new_zeros(())
+            loss = supervised_loss + consistency_weight * consistency_loss
             if not torch.isfinite(loss):
                 raise RuntimeError('Nonfinite classification loss')
             loss.backward()
@@ -166,14 +182,18 @@ def main():
             steps += 1
             batch_weight = float(criterion.weight[target].sum())
             loss_sum += float(loss.detach()) * batch_weight
+            ce_sum += float(supervised_loss.detach()) * batch_weight
+            consistency_sum += float(consistency_loss.detach()) * batch_weight
             weight_sum += batch_weight
             correct += int((logits.argmax(1) == target).sum())
             seen += len(target)
             if iteration % cfg.log_interval == 0 or iteration == len(loaders[0]):
                 elapsed = time.perf_counter() - start
-                logger.info('Epoch [%d][%d/%d] lr=%.6g loss=%.5f trainAcc=%.4f '
+                logger.info('Epoch [%d][%d/%d] lr=%.6g loss=%.5f '
+                            'lossCE=%.5f lossConsistency=%.5f trainAcc=%.4f '
                             'updates=%d ETA=%.1fmin memory=%dMiB', epoch+1, iteration, len(loaders[0]),
-                            lr, loss_sum/weight_sum, correct/seen, steps,
+                            lr, loss_sum/weight_sum, ce_sum/weight_sum,
+                            consistency_sum/weight_sum, correct/seen, steps,
                             elapsed/max(steps, 1)*(total_steps-steps)/60,
                             torch.cuda.max_memory_allocated() // 1024**2)
         metrics = evaluate(model, loaders[1], 'cuda', criterion)

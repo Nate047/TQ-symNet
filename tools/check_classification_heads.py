@@ -9,6 +9,7 @@ from torch import nn
 from torch.nn import functional as F
 from TQ_SymNet.classification import FrozenPyramidClassifier, state_sha256
 from TQ_SymNet.classification_heads import CrossScaleClassQueryHead, CrossScaleHybridPoolHead
+from TQ_SymNet.classification_consistency import brightness_contrast_view, consistency_kl
 
 
 class DummyBackbone(nn.Module):
@@ -69,8 +70,67 @@ def check_query_ablation_contract():
     print('PASS: C2/C3 shared initialization/RNG/output, per-position norm, live scale embeddings')
 
 
+def check_temperature_contract():
+    torch.manual_seed(29)
+    baseline = CrossScaleClassQueryHead(in_channels=16, embed_dim=32,
+                                       scale_fusion='learned', dropout=0.)
+    baseline_rng = torch.get_rng_state().clone()
+    torch.manual_seed(29)
+    adaptive = CrossScaleClassQueryHead(in_channels=16, embed_dim=32,
+                                       scale_fusion='learned', dropout=0.,
+                                       attention_temperature=True)
+    assert torch.equal(baseline_rng, torch.get_rng_state()), 'Temperature changes shared RNG'
+    for name, parameter in baseline.state_dict().items():
+        torch.testing.assert_close(parameter, adaptive.state_dict()[name], rtol=0., atol=0.)
+    images = [torch.randn(2, 16, side, side) for side in (16, 8, 4, 2)]
+    baseline.eval()
+    adaptive.eval()
+    with torch.no_grad():
+        torch.testing.assert_close(adaptive(images), baseline(images), rtol=1e-5, atol=1e-6)
+    adaptive.collect_debug = True
+    with torch.no_grad():
+        adaptive(images)
+    torch.testing.assert_close(torch.tensor(adaptive.last_debug['attention_temperature_by_class']),
+                               torch.ones(3))
+    adaptive.zero_grad(set_to_none=True)
+    F.cross_entropy(adaptive(images), torch.tensor([0, 2])).backward()
+    assert adaptive.temperature_head[-1].weight.grad is not None
+    assert adaptive.temperature_head[-1].weight.grad.abs().max() > 0
+    with torch.no_grad():
+        before = adaptive(images)
+        adaptive.temperature_head[-1].bias.fill_(0.5)
+        after = adaptive(images)
+    assert (before - after).abs().max() > 1e-7, 'Temperature does not change query features'
+    print('PASS: C3/C4 common state/RNG/logits, live bounded attention temperature')
+
+
+def check_consistency_contract():
+    images = torch.randn(3, 3, 8, 8)
+    mean, std = (123.675, 116.28, 103.53), (58.395, 57.12, 57.375)
+    torch.manual_seed(5)
+    altered = brightness_contrast_view(images, mean, std, 5., .05)
+    torch.manual_seed(5)
+    repeated = brightness_contrast_view(images, mean, std, 5., .05)
+    assert torch.equal(altered, repeated)
+    assert altered.shape == images.shape and not torch.equal(altered, images)
+    low = -torch.tensor(mean) / torch.tensor(std)
+    high = (255. - torch.tensor(mean)) / torch.tensor(std)
+    assert torch.all(altered >= low[None, :, None, None] - 1e-6)
+    assert torch.all(altered <= high[None, :, None, None] + 1e-6)
+    student = torch.randn(3, 3, requires_grad=True)
+    teacher = torch.randn(3, 3, requires_grad=True)
+    loss = consistency_kl(student, teacher)
+    assert torch.isfinite(loss) and loss >= 0
+    loss.backward()
+    assert student.grad is not None and student.grad.abs().sum() > 0
+    assert teacher.grad is None, 'Reference logits must be stop-gradient'
+    print('PASS: deterministic mild pixel perturbation, student-only consistency gradient')
+
+
 def main():
     check_query_ablation_contract()
+    check_temperature_contract()
+    check_consistency_contract()
     torch.manual_seed(1)
     image = torch.randn(2, 3, 32, 32)
     labels = torch.tensor([0, 2])
@@ -78,7 +138,10 @@ def main():
                 ('query_fixed', CrossScaleClassQueryHead(
                     in_channels=16, embed_dim=32, heads=4, scale_fusion='fixed')),
                 ('query_learned', CrossScaleClassQueryHead(
-                    in_channels=16, embed_dim=32, heads=4, scale_fusion='learned'))]
+                    in_channels=16, embed_dim=32, heads=4, scale_fusion='learned')),
+                ('query_temperature', CrossScaleClassQueryHead(
+                    in_channels=16, embed_dim=32, heads=4, scale_fusion='learned',
+                    attention_temperature=True))]
     for name, head in variants:
         model = FrozenPyramidClassifier(DummyBackbone(), DummyNeck(), head).train()
         backbone_hash, neck_hash = state_sha256(model.backbone), state_sha256(model.neck)
