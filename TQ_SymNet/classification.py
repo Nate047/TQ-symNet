@@ -152,6 +152,75 @@ class FrozenPyramidClassifier(nn.Module):
         return self.classifier(pyramid)
 
 
+class TunablePyramidClassifier(FrozenPyramidClassifier):
+    """Independent classifier copy; frozen neck may still transmit input gradients."""
+    def __init__(self, backbone, neck, classifier, train_backbone=False, train_neck=False):
+        super().__init__(backbone, neck, classifier)
+        self.train_backbone, self.train_neck = bool(train_backbone), bool(train_neck)
+        self.backbone.requires_grad_(self.train_backbone)
+        self.neck.requires_grad_(self.train_neck)
+
+    def train(self, mode=True):
+        super().train(mode)
+        self.backbone.train(mode and self.train_backbone)
+        self.neck.train(mode and self.train_neck)
+        return self
+
+    def forward(self, images):
+        if self.train_backbone:
+            features = self.backbone(images)
+        else:
+            with torch.no_grad():
+                features = self.backbone(images)
+        # If ONLY backbone is trainable, the neck must remain differentiable
+        # with respect to its input despite all neck parameters being frozen.
+        if self.train_backbone or self.train_neck:
+            pyramid = self.neck(features)
+        else:
+            with torch.no_grad():
+                pyramid = self.neck(features)
+        return (self.classifier(pyramid, images=images)
+                if getattr(self.classifier, 'uses_images', False) else self.classifier(pyramid))
+
+
+def encoder_policy(model):
+    return dict(backbone=bool(getattr(model, 'train_backbone', False)),
+                neck=bool(getattr(model, 'train_neck', False)))
+
+
+def restore_classification_snapshot(model, snapshot):
+    """Restore selected epoch's encoders as well as its classification head."""
+    policy = encoder_policy(model)
+    if snapshot.get('encoder_trainability', policy) != policy:
+        raise ValueError('Encoder training policy differs from classification checkpoint')
+    for name in ('backbone', 'neck'):
+        module = getattr(model, name, None)
+        if module is None:
+            continue
+        key = name + '_state_dict'
+        if key in snapshot:
+            module.load_state_dict(snapshot[key], strict=True)
+        elif policy[name]:
+            raise ValueError('Fine-tuned checkpoint is missing ' + key)
+        if state_sha256(module) != snapshot.get(name + '_state_sha256'):
+            raise ValueError('Restored classification %s hash mismatch' % name)
+    model.classifier.load_state_dict(snapshot['classifier_state_dict'], strict=True)
+
+
+def classification_parameter_groups(model, optimizer_options):
+    groups = []
+    for name in ('classifier', 'backbone', 'neck'):
+        module = getattr(model, name, None)
+        parameters = [p for p in module.parameters() if p.requires_grad] if module is not None else []
+        if parameters:
+            multiplier = float(optimizer_options.get(name + '_lr_mult', 1.))
+            if multiplier <= 0:
+                raise ValueError('Trainable parameter group requires positive lr multiplier')
+            groups.append(dict(params=parameters, name=name, lr_mult=multiplier,
+                               lr=float(optimizer_options['lr']) * multiplier))
+    return groups
+
+
 def build_frozen_classifier(config, checkpoint_path):
     """Reconstruct the architecture recorded in a classification config."""
     mode = config.get('classification_head', 'sym')
@@ -174,6 +243,9 @@ def build_frozen_classifier(config, checkpoint_path):
     else:
         classifier = (CrossScaleHybridPoolHead(**options) if mode == 'hybrid_pool'
                       else CrossScaleClassQueryHead(**options))
+    if config.get('encoder_training') is not None:
+        policy = dict(config.encoder_training)
+        return TunablePyramidClassifier(backbone, neck, classifier, **policy), audit
     return FrozenPyramidClassifier(backbone, neck, classifier), audit
 
 

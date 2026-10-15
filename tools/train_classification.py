@@ -1,4 +1,4 @@
-"""Train a classification head on strictly frozen detector features."""
+"""Train an independent classifier with audited encoder freezing/fine-tuning."""
 import argparse
 import json
 import logging
@@ -14,7 +14,8 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 from TQ_SymNet.classification import (CLASS_NAMES, TBXImageDataset,
-    build_frozen_classifier, classification_metrics, file_sha256, state_sha256)
+    build_frozen_classifier, classification_metrics, file_sha256, state_sha256,
+    encoder_policy, classification_parameter_groups, restore_classification_snapshot)
 from TQ_SymNet.classification_consistency import paired_view_logits, consistency_kl
 from TQ_SymNet.classification_diagnostics import export_diagnostics, summarize_history, accuracy_key
 
@@ -23,6 +24,34 @@ def seed_worker(worker_id):
     value = torch.initial_seed() % 2**32
     random.seed(value)
     np.random.seed(value)
+
+
+def update_batches(loader, accumulation):
+    """Group microbatches without retaining their GPU activation graphs."""
+    pending = []
+    for batch in loader:
+        pending.append(batch)
+        if len(pending) == accumulation:
+            yield pending
+            pending = []
+    if pending:
+        yield pending
+
+
+def audit_encoders(model, initial_hashes):
+    policy, hashes = encoder_policy(model), {}
+    for name, trainable in policy.items():
+        module = getattr(model, name, None)
+        if module is None:
+            hashes[name] = None
+            continue
+        hashes[name] = state_sha256(module)
+        if not trainable and (hashes[name] != initial_hashes[name] or module.training or any(
+                p.requires_grad or p.grad is not None for p in module.parameters())):
+            raise RuntimeError('Frozen encoder contract violated: ' + name)
+        if trainable and not all(p.requires_grad for p in module.parameters()):
+            raise RuntimeError('Partial encoder freeze differs from configured policy: ' + name)
+    return hashes
 
 
 def dataset(cfg, split, training):
@@ -115,6 +144,9 @@ def main():
     args = parser.parse_args()
     cfg = Config.fromfile(args.config)
     interval = int(cfg.get('diagnostic_interval', 2))
+    accumulation = int(cfg.training.get('accumulation_steps', 1))
+    if accumulation < 1:
+        raise ValueError('accumulation_steps must be positive')
     if interval < 1 or cfg.selection_metric not in ('accuracy', 'tb_auc'):
         raise ValueError('Require positive diagnostic_interval and accuracy/tb_auc selection')
     consistency = cfg.get('consistency', None)
@@ -175,15 +207,22 @@ def main():
     frozen_neck_hash = (state_sha256(model.neck)
                         if getattr(model, 'neck', None) is not None else None)
     source_hash = file_sha256(cfg.backbone_checkpoint)
-    optimizer = torch.optim.SGD(model.classifier.parameters(), lr=cfg.optimizer.lr,
+    policy = encoder_policy(model)
+    initial_hashes = dict(backbone=frozen_hash, neck=frozen_neck_hash)
+    optimizer = torch.optim.SGD(classification_parameter_groups(model, cfg.optimizer), lr=cfg.optimizer.lr,
                                momentum=cfg.optimizer.momentum, weight_decay=cfg.optimizer.weight_decay)
     criterion = nn.CrossEntropyLoss(weight=torch.tensor(cfg.training.class_weights, device='cuda'))
     consistency_generator = (torch.Generator(device='cuda').manual_seed(args.seed + 1000003)
                              if consistency_weight else None)
-    logger.info('[CLS-BUILD] head=%s backboneFrozen=True neckFrozen=%s '
-                'frozenEval=True AMP=False updates=onePerBatch consistency=%.3f source=%s audit=%s',
-                cfg.get('classification_head', 'sym'), frozen_neck_hash is not None,
+    logger.info('[CLS-BUILD] head=%s backboneFrozen=%s neckFrozen=%s '
+                'AMP=False microBatch=%d accumulation=%d effectiveBatch=%d '
+                'consistency=%.3f source=%s audit=%s',
+                cfg.get('classification_head', 'sym'), not policy['backbone'], not policy['neck'],
+                cfg.data.batch_size, accumulation, cfg.data.batch_size * accumulation,
                 consistency_weight, cfg.backbone_checkpoint, audit)
+    logger.info('[CLS-OPTIMIZER] groups=%s', [dict(name=g['name'], lr_mult=g['lr_mult'],
+                parameters=sum(p.numel() for p in g['params'])) for g in optimizer.param_groups])
+    logger.info('[CLS-ENCODER] initial policy=%s classifierSHA256=%s', policy, state_sha256(model.classifier))
     if consistency_weight:
         logger.info('[CLS-CONSISTENCY] pixelBrightness=+/-%.2f contrast=+/-%.3f '
                     'weight=%.3f sharedDropout=True isolatedRNG=True seed=%d',
@@ -201,68 +240,83 @@ def main():
     steps, best, best_accuracy = 0, float('-inf'), (float('-inf'),)*3
     best_auc = float('-inf')
     primary_filename = 'best_cls_accuracy.pth' if cfg.selection_metric == 'accuracy' else 'best_cls_auc.pth'
-    total_steps = len(loaders[0]) * cfg.training.epochs
+    updates_per_epoch = (len(loaders[0]) + accumulation - 1) // accumulation
+    total_steps = updates_per_epoch * cfg.training.epochs
+    class_weights_cpu = torch.tensor(cfg.training.class_weights)
     for epoch in range(cfg.training.epochs):
         model.train()
         if hasattr(model.classifier, 'collect_debug'):
             model.classifier.collect_debug = False
         loss_sum, ce_sum, consistency_sum = 0., 0., 0.
         weight_sum, correct, seen = 0., 0, 0
-        for iteration, (images, target, _) in enumerate(loaders[0], 1):
+        for iteration, microbatches in enumerate(update_batches(loaders[0], accumulation), 1):
             lr = cfg.optimizer.lr * cfg.training.lr_gamma ** sum(epoch >= step for step in cfg.training.lr_steps)
             if steps < cfg.training.warmup_iters:
                 lr *= cfg.training.warmup_ratio + (1 - cfg.training.warmup_ratio) * steps / cfg.training.warmup_iters
             for group in optimizer.param_groups:
-                group['lr'] = lr
-            images, target = images.cuda(non_blocking=True), target.cuda(non_blocking=True)
+                group['lr'] = lr * group['lr_mult']
             optimizer.zero_grad(set_to_none=True)
-            if consistency_weight:
-                logits, augmented_logits = paired_view_logits(
-                    model, images, cfg.data.mean, cfg.data.std,
-                    brightness_pixels=float(consistency.brightness_pixels),
-                    contrast=float(consistency.contrast), generator=consistency_generator)
-                supervised_loss = criterion(logits, target)
-                consistency_loss = consistency_kl(augmented_logits, logits)
-            else:
-                logits = model(images)
-                supervised_loss = criterion(logits, target)
-                consistency_loss = supervised_loss.new_zeros(())
-            loss = supervised_loss + consistency_weight * consistency_loss
-            if not torch.isfinite(loss):
-                raise RuntimeError('Nonfinite classification loss')
-            loss.backward()
+            # Weighted CE mean over the WHOLE effective batch, not an average
+            # of separately normalized microbatch means with different labels.
+            window_weight = sum(float(class_weights_cpu[target].sum()) for _, target, _ in microbatches)
+            for images, target, _ in microbatches:
+                batch_weight = float(class_weights_cpu[target].sum())
+                images, target = images.cuda(non_blocking=True), target.cuda(non_blocking=True)
+                if consistency_weight:
+                    logits, augmented_logits = paired_view_logits(
+                        model, images, cfg.data.mean, cfg.data.std,
+                        brightness_pixels=float(consistency.brightness_pixels),
+                        contrast=float(consistency.contrast), generator=consistency_generator)
+                    supervised_loss = criterion(logits, target)
+                    consistency_loss = consistency_kl(augmented_logits, logits)
+                else:
+                    logits = model(images)
+                    supervised_loss = criterion(logits, target)
+                    consistency_loss = supervised_loss.new_zeros(())
+                loss = supervised_loss + consistency_weight * consistency_loss
+                if not torch.isfinite(loss):
+                    raise RuntimeError('Nonfinite classification loss')
+                (loss * (batch_weight / window_weight)).backward()
+                loss_sum += float(loss.detach()) * batch_weight
+                ce_sum += float(supervised_loss.detach()) * batch_weight
+                consistency_sum += float(consistency_loss.detach()) * batch_weight
+                weight_sum += batch_weight
+                correct += int((logits.argmax(1) == target).sum())
+                seen += len(target)
+            if iteration == 1 or iteration % cfg.log_interval == 0:
+                grad_norms = {}
+                monitored = {name:getattr(model, name, None) for name in ('classifier', 'backbone', 'neck')}
+                monitored.update({name:getattr(model.classifier, name, None) for name in ('sym', 'lbp', 'gabor')})
+                for name, module in monitored.items():
+                    gradients = [p.grad.detach() for p in module.parameters() if p.grad is not None] if module is not None else []
+                    norm = torch.stack([g.float().square().sum() for g in gradients]).sum().sqrt() if gradients else None
+                    if norm is not None and not torch.isfinite(norm):
+                        raise RuntimeError('Nonfinite gradient in ' + name)
+                    grad_norms[name] = float(norm) if norm is not None else 0.
+                    if policy.get(name, False) and norm is None:
+                        raise RuntimeError('Trainable encoder has no gradients: ' + name)
+                logger.info('[CLS-GRAD] epoch=%d update=%d norms=%s', epoch+1, iteration, grad_norms)
             optimizer.step()
             steps += 1
-            batch_weight = float(criterion.weight[target].sum())
-            loss_sum += float(loss.detach()) * batch_weight
-            ce_sum += float(supervised_loss.detach()) * batch_weight
-            consistency_sum += float(consistency_loss.detach()) * batch_weight
-            weight_sum += batch_weight
-            correct += int((logits.argmax(1) == target).sum())
-            seen += len(target)
-            if iteration % cfg.log_interval == 0 or iteration == len(loaders[0]):
+            if iteration % cfg.log_interval == 0 or iteration == updates_per_epoch:
                 elapsed = time.perf_counter() - start
                 logger.info('Epoch [%d][%d/%d] lr=%.6g loss=%.5f '
                             'lossCE=%.5f lossConsistency=%.5f trainAcc=%.4f '
-                            'updates=%d ETA=%.1fmin memory=%dMiB', epoch+1, iteration, len(loaders[0]),
+                            'updates=%d ETA=%.1fmin memory=%dMiB', epoch+1, iteration, updates_per_epoch,
                             lr, loss_sum/weight_sum, ce_sum/weight_sum,
                             consistency_sum/weight_sum, correct/seen, steps,
                             elapsed/max(steps, 1)*(total_steps-steps)/60,
                             torch.cuda.max_memory_allocated() // 1024**2)
         detailed = (epoch+1) % interval == 0
         metrics, evidence = evaluate(model, loaders[1], 'cuda', criterion, detailed=detailed)
-        after_hash = state_sha256(model.backbone)
-        after_neck_hash = (state_sha256(model.neck)
-                           if frozen_neck_hash is not None else None)
-        if after_hash != frozen_hash or model.backbone.training or any(
-                p.requires_grad or p.grad is not None for p in model.backbone.parameters()):
-            raise RuntimeError('Frozen backbone contract violated')
-        if frozen_neck_hash is not None and (after_neck_hash != frozen_neck_hash
-                or model.neck.training or any(p.requires_grad or p.grad is not None
-                                              for p in model.neck.parameters())):
-            raise RuntimeError('Frozen CrossScale contract violated')
-        logger.info('[CLS-FROZEN] epoch=%d unchanged=True backboneSHA256=%s neckSHA256=%s',
-                    epoch+1, after_hash, after_neck_hash)
+        hashes = audit_encoders(model, initial_hashes)
+        after_hash, after_neck_hash = hashes['backbone'], hashes['neck']
+        logger.info('[CLS-ENCODER] epoch=%d policy=%s changed=%s backboneSHA256=%s neckSHA256=%s',
+                    epoch+1, policy, {k: hashes[k] != initial_hashes[k] for k in hashes},
+                    after_hash, after_neck_hash)
+        if not any(policy.values()):
+            logger.info('[CLS-FROZEN] epoch=%d unchanged=True backboneSHA256=%s neckSHA256=%s',
+                        epoch+1, after_hash, after_neck_hash)
         debug = metrics.get('readout_debug')
         if debug:
             logger.info('[CLS-READOUT] epoch=%d head=%s sampledVal=%s',
@@ -280,15 +334,21 @@ def main():
         snapshot = dict(classifier_state_dict={k:v.detach().cpu() for k,v in model.classifier.state_dict().items()},
                         config=cfg.to_dict(), epoch=epoch+1, seed=args.seed, metrics=metrics,
                         backbone_checkpoint=str(cfg.backbone_checkpoint), backbone_checkpoint_sha256=source_hash,
-                        backbone_state_sha256=frozen_hash, class_names=CLASS_NAMES,
-                        neck_state_sha256=frozen_neck_hash,
+                        backbone_state_sha256=after_hash, class_names=CLASS_NAMES,
+                        neck_state_sha256=after_neck_hash, encoder_trainability=policy,
+                        initial_backbone_state_sha256=frozen_hash, initial_neck_state_sha256=frozen_neck_hash,
                         classification_head=cfg.get('classification_head', 'sym'),
                         data_audit=data_audit, selection_metric=cfg.selection_metric,
                         optimizer=optimizer.state_dict(), updates=steps)
+        if any(policy.values()) or cfg.get('save_encoder', False):
+            snapshot['backbone_state_dict'] = {k:v.detach().cpu() for k,v in model.backbone.state_dict().items()}
+            if getattr(model, 'neck', None) is not None:
+                snapshot['neck_state_dict'] = {k:v.detach().cpu() for k,v in model.neck.state_dict().items()}
         torch.save(snapshot, out / 'latest.pth')
         metadata = dict(epoch=epoch+1, seed=args.seed, config_sha256=file_sha256(out/'resolved_config.py'),
                         classifier_state_sha256=state_sha256(model.classifier),
-                        backbone_state_sha256=frozen_hash, neck_state_sha256=frozen_neck_hash,
+                        backbone_state_sha256=after_hash, neck_state_sha256=after_neck_hash,
+                        encoder_trainability=policy,
                         detector_checkpoint_sha256=source_hash, val_annotation_sha256=data_audit['val']['sha256'])
         if detailed:
             report = export_diagnostics(out/'diagnostics'/('epoch_%02d' % (epoch+1)), val, evidence, metadata)
@@ -310,13 +370,15 @@ def main():
     # One final diagnostic pass on selected VAL-best weights, not on latest.
     from mmcv.runner.checkpoint import _load_checkpoint
     chosen = _load_checkpoint(str(out/primary_filename), map_location='cpu')
-    model.classifier.load_state_dict(chosen['classifier_state_dict'], strict=True)
+    restore_classification_snapshot(model, chosen)
     chosen_metrics, evidence = evaluate(model, loaders[1], 'cuda', criterion,
                                         detailed=True, branch_diagnostics=True)
     for name in ('accuracy', 'tb_sensitivity', 'tb_specificity'):
         if abs(chosen_metrics[name] - chosen['metrics'][name]) > 1e-8:
             raise RuntimeError('Selected checkpoint replay differs: ' + name)
     metadata.update(epoch=chosen['epoch'], classifier_state_sha256=state_sha256(model.classifier),
+                    backbone_state_sha256=state_sha256(model.backbone),
+                    neck_state_sha256=state_sha256(model.neck) if getattr(model, 'neck', None) is not None else None,
                     classification_checkpoint=primary_filename,
                     classification_checkpoint_sha256=file_sha256(out/primary_filename))
     report = export_diagnostics(out/'diagnostics'/'best', val, evidence, metadata)

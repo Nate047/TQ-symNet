@@ -10,7 +10,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from TQ_SymNet.classification import (CLASS_NAMES, TBXImageDataset,
-    build_frozen_classifier, file_sha256, state_sha256)
+    build_frozen_classifier, file_sha256, state_sha256, restore_classification_snapshot, encoder_policy)
 
 
 def main():
@@ -34,15 +34,19 @@ def main():
     if file_sha256(source) != snapshot['backbone_checkpoint_sha256']:
         raise ValueError('Backbone source checkpoint differs from classification training')
     model, audit = build_frozen_classifier(cfg, source)
-    if state_sha256(model.backbone) != snapshot['backbone_state_sha256']:
-        raise ValueError('Backbone tensors differ from classification training')
+    initial_backbone_hash = state_sha256(model.backbone)
+    initial_neck_hash = state_sha256(model.neck) if getattr(model, 'neck', None) is not None else None
+    if initial_backbone_hash != snapshot.get('initial_backbone_state_sha256', snapshot['backbone_state_sha256']):
+        raise ValueError('Initial backbone source differs from classification training')
+    if initial_neck_hash != snapshot.get('initial_neck_state_sha256', snapshot.get('neck_state_sha256')):
+        raise ValueError('Initial neck source differs from classification training')
+    restore_classification_snapshot(model, snapshot)
     actual_neck_hash = (state_sha256(model.neck)
                         if getattr(model, 'neck', None) is not None else None)
     if actual_neck_hash != snapshot.get('neck_state_sha256'):
         raise ValueError('CrossScale tensors differ from classification training')
     if cfg.get('classification_head', 'sym') != snapshot.get('classification_head', 'sym'):
         raise ValueError('Classification head type differs from checkpoint')
-    model.classifier.load_state_dict(snapshot['classifier_state_dict'], strict=True)
     model.cuda().eval()
     annotation = args.annotation or cfg.data.test_annotation
     index = json.loads(Path(annotation).read_text(encoding='utf-8'))
@@ -76,11 +80,15 @@ def main():
                     filenames=data.filenames, classification_checkpoint=args.checkpoint,
                     classification_checkpoint_sha256=file_sha256(args.checkpoint),
                     backbone_checkpoint=str(source), backbone_sha256=snapshot['backbone_state_sha256'],
+                    encoder_mode='independent_classifier_copy' if cfg.get('encoder_training') is not None else 'shared_frozen',
+                    encoder_trainability=encoder_policy(model),
+                    detector_source_backbone_sha256=initial_backbone_hash,
+                    detector_source_neck_sha256=initial_neck_hash,
                     neck_sha256=actual_neck_hash,
                     classification_head=snapshot.get('classification_head', 'sym'),
                     validation_epoch=snapshot['epoch'], validation_metrics=snapshot['metrics'],
                     checkpoint_audit=audit, txt_sha256=file_sha256(path),
-                    note='Classification probabilities only; bbox filtering is configured by export_online.py.')
+                    note='Classifier and detector encoders may differ; detector source hashes remain audited.')
     path.with_suffix('.classification.manifest.json').write_text(
         json.dumps(manifest, indent=2), encoding='utf-8')
     print('Exported %d rows: Healthy Sick_nonTB TB -> %s' % (len(data), path))

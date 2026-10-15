@@ -122,10 +122,14 @@ class PriorClassQueryHead(CrossScaleClassQueryHead):
     uses_images = True
 
     def __init__(self, use_sym=False, use_lbp=False, use_gabor=False,
+                 sym_mode='mirror_neighbour',
                  texture_grid=32, image_mean=(123.675, 116.28, 103.53),
                  image_std=(58.395, 57.12, 57.375), **kwargs):
         super().__init__(**kwargs)
         self.use_sym, self.use_lbp, self.use_gabor = use_sym, use_lbp, use_gabor
+        if sym_mode not in ('mirror_neighbour', 'original'):
+            raise ValueError('Unknown classification Sym mode')
+        self.sym_mode = sym_mode
         self.texture_grid = int(texture_grid)
         self.capture_diagnostics = False
         self.image_diagnostics = {}
@@ -147,7 +151,11 @@ class PriorClassQueryHead(CrossScaleClassQueryHead):
             nn.init.zeros_(self.branch_gate[-1].bias)
         with torch.random.fork_rng(devices=[]):
             if use_sym:
-                self.sym = nn.ModuleList([MirrorNeighbourAttention(channels, d) for _ in range(3)])
+                if sym_mode == 'original':
+                    from .classification_sym import OriginalSymPyramid
+                    self.sym = OriginalSymPyramid(channels, d)
+                else:
+                    self.sym = nn.ModuleList([MirrorNeighbourAttention(channels, d) for _ in range(3)])
                 self.sym_read = nn.ModuleList([nn.MultiheadAttention(d, self.heads, dropout=0.,
                                                batch_first=True) for _ in range(3)])
                 self.sym_level_gate = nn.Linear(2*d, 1)
@@ -179,8 +187,10 @@ class PriorClassQueryHead(CrossScaleClassQueryHead):
         query = self.visual_query(local + self.queries[None])
         responses, debug = [local], {}
         if self.use_sym:
-            levels = [self.read(query, module(feature), reader, 'sym_p%d' % (i+3))[0]
-                      for i, (feature, module, reader) in enumerate(zip(pyramid[1:], self.sym, self.sym_read))]
+            features = (self.sym(pyramid[1:]) if self.sym_mode == 'original' else
+                        [module(feature) for module, feature in zip(self.sym, pyramid[1:])])
+            levels = [self.read(query, feature, reader, 'sym_p%d' % (i+3))[0]
+                      for i, (feature, reader) in enumerate(zip(features, self.sym_read))]
             stacked = torch.stack(levels, 2)
             context = global_feature[:, None, None].expand_as(stacked)
             level_gate = self.sym_level_gate(torch.cat([stacked, context], -1)).squeeze(-1).softmax(-1)

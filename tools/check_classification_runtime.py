@@ -7,7 +7,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import torch
 from torch.nn import functional as F
-from TQ_SymNet.classification import build_frozen_classifier, state_sha256
+from TQ_SymNet.classification import (build_frozen_classifier, state_sha256,
+                                     encoder_policy, classification_parameter_groups)
 from TQ_SymNet.classification_consistency import paired_view_logits, consistency_kl
 
 
@@ -27,7 +28,7 @@ def main():
     before_backbone = state_sha256(model.backbone)
     before_neck = (state_sha256(model.neck)
                    if getattr(model, 'neck', None) is not None else None)
-    x = torch.zeros((1, 3, cfg.data.image_size, cfg.data.image_size), device='cuda')
+    x = torch.randn((1, 3, cfg.data.image_size, cfg.data.image_size), device='cuda')
     consistency = cfg.get('consistency', None)
     if consistency is not None and consistency.weight > 0:
         generator = torch.Generator(device='cuda').manual_seed(1000003)
@@ -44,14 +45,39 @@ def main():
     if not any(p.grad is not None and torch.isfinite(p.grad).all()
                for p in model.classifier.parameters()):
         raise RuntimeError('Classification head received no finite gradient')
+    policy = encoder_policy(model)
     for name in ('backbone', 'neck'):
         module = getattr(model, name, None)
-        if module is not None and (module.training or any(
+        if module is not None and not policy[name] and (module.training or any(
                 p.requires_grad or p.grad is not None for p in module.parameters())):
             raise RuntimeError('Frozen %s received a training update' % name)
-    if state_sha256(model.backbone) != before_backbone or (
-            before_neck is not None and state_sha256(model.neck) != before_neck):
+        if module is not None and policy[name] and not any(
+                p.grad is not None and torch.isfinite(p.grad).all() and p.grad.abs().sum() > 0
+                for p in module.parameters()):
+            raise RuntimeError('Trainable %s did not receive a nonzero finite gradient' % name)
+    if (not policy['backbone'] and state_sha256(model.backbone) != before_backbone) or (
+            not policy['neck'] and before_neck is not None and state_sha256(model.neck) != before_neck):
         raise RuntimeError('Frozen detector state changed')
+    groups = classification_parameter_groups(model, cfg.optimizer)
+    expected = {'classifier'} | {name for name, flag in policy.items() if flag}
+    if {group['name'] for group in groups} != expected:
+        raise RuntimeError('Optimizer is missing an encoder group')
+    if getattr(model.classifier, 'sym_mode', '') == 'original':
+        model.eval()
+        with torch.no_grad():
+            # Compare the wrapper against the original head's direct position
+            # -> transformer -> projection chain using IDENTICAL parameters.
+            sym = model.classifier.sym
+            pyramid = model.neck(model.backbone(x))[1:]
+            wrapped = sym(pyramid)
+            for feature, projection, actual in zip(pyramid, sym.projections, wrapped):
+                b, _, h, w = feature.shape
+                mask = feature.new_zeros((b, h, w), dtype=torch.bool)
+                direct = sym.transformer((feature,), [mask], sym.query_embedding.weight,
+                                          [sym.position(mask, feature)])
+                torch.testing.assert_close(actual, projection(direct), rtol=1e-5, atol=1e-6)
+        print('PASS: official Sym position/deformable encoder direct-call parity on CUDA')
+    print('Encoder policy:', policy, 'optimizer groups:', [(g['name'], g['lr_mult']) for g in groups])
     print('PASS: head=%s source=%s logits=%s CUDA_MiB=%d audit=%s' % (
         cfg.get('classification_head', 'sym'), source,
         logits.detach().cpu().tolist(), torch.cuda.max_memory_allocated() // 1048576, audit))

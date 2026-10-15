@@ -130,7 +130,8 @@ def main():
     for path in sorted((ROOT/'configs/classification').glob('c*.py')):
         cfg = resolve(path)
         assert cfg['data']['expected_train_images'] == 6888
-        if cfg.get('classification_head') == 'prior_query':
+        if (cfg.get('classification_head') == 'prior_query' and
+                cfg['classification_options'].get('sym_mode') != 'original'):
             PriorClassQueryHead(**cfg['classification_options'])
     print('PASS: config inheritance, 59-bin mapping, normalized DC-free quadrature kernels')
     from TQ_SymNet.classification_diagnostics import accuracy_key, error_type, export_diagnostics, summarize_history

@@ -118,9 +118,14 @@ def main():
     model = build_detector(cfg.model)
     # Full network checkpoints must contain the quality scorer, not just the detector.
     checkpoint, checkpoint_audit = load_retained_checkpoint(model, args.checkpoint)
-    if (classification_manifest is not None
-            and state_sha256(model.backbone) != classification_manifest['backbone_sha256']):
-        raise ValueError('Detection backbone differs from the frozen classification backbone')
+    if classification_manifest is not None:
+        independent = classification_manifest.get('encoder_mode') == 'independent_classifier_copy'
+        expected_backbone = (classification_manifest['detector_source_backbone_sha256'] if independent
+                             else classification_manifest['backbone_sha256'])
+        if state_sha256(model.backbone) != expected_backbone:
+            raise ValueError('Detection backbone differs from the audited classifier initialization source')
+        if independent and state_sha256(model.neck) != classification_manifest['detector_source_neck_sha256']:
+            raise ValueError('Detection neck differs from the audited classifier initialization source')
     model.CLASSES = checkpoint.get('meta', {}).get('CLASSES', dataset.CLASSES)
     model.quality_collect = False
     model = MMDataParallel(model.cuda(), device_ids=[0])
@@ -173,6 +178,8 @@ def main():
                     image_ids_in_order=image_ids, results=result_files,
                     classification_txt=classification_txt, cls_filter=args.cls_filter,
                     classification_source=('external_official_example' if external_manifest is not None
+                                           else 'own_independent_classifier' if classification_manifest is not None
+                                           and classification_manifest.get('encoder_mode') == 'independent_classifier_copy'
                                            else 'own_frozen_classifier' if classification_manifest is not None
                                            else 'none'),
                     experiment_role=('external_classifier_diagnostic' if external_manifest is not None
