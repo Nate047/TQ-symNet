@@ -16,6 +16,7 @@ from torch.utils.data import DataLoader
 from TQ_SymNet.classification import (CLASS_NAMES, TBXImageDataset,
     build_frozen_classifier, classification_metrics, file_sha256, state_sha256)
 from TQ_SymNet.classification_consistency import paired_view_logits, consistency_kl
+from TQ_SymNet.classification_diagnostics import export_diagnostics, summarize_history, accuracy_key
 
 
 def seed_worker(worker_id):
@@ -36,10 +37,13 @@ def dataset(cfg, split, training):
 
 
 @torch.no_grad()
-def evaluate(model, loader, device, criterion):
+def evaluate(model, loader, device, criterion, detailed=False, branch_diagnostics=False):
     model.eval()
     probabilities, labels, positions = [], [], []
     debug_samples = []
+    all_logits, gates, alternatives, examples, example_counts = [], [], {}, [], {}
+    if hasattr(model.classifier, 'capture_diagnostics'):
+        model.classifier.capture_diagnostics = branch_diagnostics
     total_loss, weight_sum = 0., 0.
     for batch_index, (images, target, indices) in enumerate(loader):
         if hasattr(model.classifier, 'collect_debug'):
@@ -51,10 +55,27 @@ def evaluate(model, loader, device, criterion):
         total_loss += float(criterion(logits, target)) * batch_weight
         weight_sum += batch_weight
         probabilities.append(logits.softmax(1).cpu().numpy())
+        if detailed:
+            all_logits.append(logits.cpu().numpy())
         labels.append(target.cpu().numpy())
         positions.extend(indices.tolist())
         if getattr(model.classifier, 'last_debug', None):
             debug_samples.append(model.classifier.last_debug)
+        if branch_diagnostics and getattr(model.classifier, 'image_diagnostics', None):
+            diagnostic = model.classifier.image_diagnostics
+            gates.append(diagnostic['branch_gates'])
+            for name, values in diagnostic['counterfactual_logits'].items():
+                alternatives.setdefault(name, []).append(values)
+            prediction = logits.argmax(1).cpu().tolist()
+            for j, (idx, gt, pred) in enumerate(zip(indices.tolist(), target.cpu().tolist(), prediction)):
+                # Bounded, deterministic examples: up to 8 per true/predicted
+                # class pair, including matched correctly classified classes.
+                kind = (gt, pred)
+                if example_counts.get(kind, 0) < 8:
+                    examples.append(dict(image_id=loader.dataset.image_ids[idx],
+                        file_name=loader.dataset.filenames[idx], gt=gt, prediction=pred,
+                        maps={name: value[j] for name, value in model.classifier.attention_maps.items()}))
+                    example_counts[kind] = example_counts.get(kind, 0) + 1
     probabilities, labels = np.concatenate(probabilities), np.concatenate(labels)
     if positions != list(range(len(loader.dataset))):
         raise ValueError('Validation output ordering mismatch')
@@ -69,7 +90,17 @@ def evaluate(model, loader, device, criterion):
             **{key: np.asarray([item[key] for item in debug_samples],
                                dtype=np.float64).mean(axis=0).tolist()
                for key in debug_samples[0]})
-    return result, probabilities
+    evidence = dict(probabilities=probabilities)
+    if detailed:
+        evidence['logits'] = np.concatenate(all_logits)
+    if gates:
+        evidence.update(branch_gates=np.concatenate(gates),
+                        branch_names=model.classifier.branch_names,
+                        counterfactual_logits={name: np.concatenate(values) for name, values in alternatives.items()},
+                        attention_examples=examples)
+    if hasattr(model.classifier, 'capture_diagnostics'):
+        model.classifier.capture_diagnostics = False
+    return result, evidence
 
 
 def main():
@@ -83,6 +114,9 @@ def main():
     parser.add_argument('--deterministic', action='store_true')
     args = parser.parse_args()
     cfg = Config.fromfile(args.config)
+    interval = int(cfg.get('diagnostic_interval', 2))
+    if interval < 1 or cfg.selection_metric not in ('accuracy', 'tb_auc'):
+        raise ValueError('Require positive diagnostic_interval and accuracy/tb_auc selection')
     consistency = cfg.get('consistency', None)
     consistency_weight = float(consistency.weight) if consistency is not None else 0.
     if consistency_weight < 0:
@@ -164,7 +198,9 @@ def main():
     logger.info('[CLS-FROZEN] initialBackboneSHA256=%s initialNeckSHA256=%s sourceSHA256=%s',
                 frozen_hash, frozen_neck_hash, source_hash)
     start = time.perf_counter()
-    steps, best, best_accuracy = 0, float('-inf'), float('-inf')
+    steps, best, best_accuracy = 0, float('-inf'), (float('-inf'),)*3
+    best_auc = float('-inf')
+    primary_filename = 'best_cls_accuracy.pth' if cfg.selection_metric == 'accuracy' else 'best_cls_auc.pth'
     total_steps = len(loaders[0]) * cfg.training.epochs
     for epoch in range(cfg.training.epochs):
         model.train()
@@ -213,7 +249,8 @@ def main():
                             consistency_sum/weight_sum, correct/seen, steps,
                             elapsed/max(steps, 1)*(total_steps-steps)/60,
                             torch.cuda.max_memory_allocated() // 1024**2)
-        metrics, val_probabilities = evaluate(model, loaders[1], 'cuda', criterion)
+        detailed = (epoch+1) % interval == 0
+        metrics, evidence = evaluate(model, loaders[1], 'cuda', criterion, detailed=detailed)
         after_hash = state_sha256(model.backbone)
         after_neck_hash = (state_sha256(model.neck)
                            if frozen_neck_hash is not None else None)
@@ -237,10 +274,6 @@ def main():
                     metrics['loss'], metrics['confusion_matrix'])
         if 'tbx11k_only' in metrics:
             logger.info('[CLS-VAL-TBX11K] epoch=%d metrics=%s', epoch+1, metrics['tbx11k_only'])
-        # Per-image evidence for TB FN/FP, source shifts and model complementarity.
-        np.savez_compressed(out / ('val_predictions_epoch_%02d.npz' % (epoch+1)),
-                            probabilities=val_probabilities, labels=np.asarray(val.labels),
-                            image_ids=np.asarray(val.image_ids), filenames=np.asarray(val.filenames))
         record = dict(epoch=epoch+1, updates=steps, metrics=metrics, backbone_sha256=after_hash)
         with (out / 'metrics.jsonl').open('a', encoding='utf-8') as stream:
             stream.write(json.dumps(record) + '\n')
@@ -253,18 +286,43 @@ def main():
                         data_audit=data_audit, selection_metric=cfg.selection_metric,
                         optimizer=optimizer.state_dict(), updates=steps)
         torch.save(snapshot, out / 'latest.pth')
-        # Keep Accuracy-best as well as the historical AUC-best; do not silently
-        # change the primary selection policy between old/new ablations.
-        if epoch == 0 or metrics['accuracy'] > best_accuracy:
-            best_accuracy = metrics['accuracy']
+        metadata = dict(epoch=epoch+1, seed=args.seed, config_sha256=file_sha256(out/'resolved_config.py'),
+                        classifier_state_sha256=state_sha256(model.classifier),
+                        backbone_state_sha256=frozen_hash, neck_state_sha256=frozen_neck_hash,
+                        detector_checkpoint_sha256=source_hash, val_annotation_sha256=data_audit['val']['sha256'])
+        if detailed:
+            report = export_diagnostics(out/'diagnostics'/('epoch_%02d' % (epoch+1)), val, evidence, metadata)
+            summarize_history(out/'diagnostics')
+            logger.info('[CLS-DIAGNOSTICS] epoch=%d sources=%s', epoch+1, report['sources'])
+        improved_accuracy = accuracy_key(metrics) > best_accuracy
+        if improved_accuracy:
+            best_accuracy = accuracy_key(metrics)
             torch.save(snapshot, out / 'best_cls_accuracy.pth')
-        key = metrics[cfg.selection_metric]
-        if key > best:
-            best = key
+        improved_auc = metrics['tb_auc'] > best_auc
+        if improved_auc:
+            best_auc = metrics['tb_auc']
             torch.save(snapshot, out / 'best_cls_auc.pth')
+        improved = improved_accuracy if cfg.selection_metric == 'accuracy' else improved_auc
+        if improved:
+            best = metrics[cfg.selection_metric]
             (out / 'best_metrics.json').write_text(json.dumps(record, indent=2), encoding='utf-8')
             logger.info('[CLS-BEST] epoch=%d %s=%.6f', epoch+1, cfg.selection_metric, best)
-    logger.info('Finished. Best %s=%.6f checkpoint=%s', cfg.selection_metric, best, out/'best_cls_auc.pth')
+    # One final diagnostic pass on selected VAL-best weights, not on latest.
+    from mmcv.runner.checkpoint import _load_checkpoint
+    chosen = _load_checkpoint(str(out/primary_filename), map_location='cpu')
+    model.classifier.load_state_dict(chosen['classifier_state_dict'], strict=True)
+    chosen_metrics, evidence = evaluate(model, loaders[1], 'cuda', criterion,
+                                        detailed=True, branch_diagnostics=True)
+    for name in ('accuracy', 'tb_sensitivity', 'tb_specificity'):
+        if abs(chosen_metrics[name] - chosen['metrics'][name]) > 1e-8:
+            raise RuntimeError('Selected checkpoint replay differs: ' + name)
+    metadata.update(epoch=chosen['epoch'], classifier_state_sha256=state_sha256(model.classifier),
+                    classification_checkpoint=primary_filename,
+                    classification_checkpoint_sha256=file_sha256(out/primary_filename))
+    report = export_diagnostics(out/'diagnostics'/'best', val, evidence, metadata)
+    logger.info('[CLS-BEST-DIAGNOSTICS] epoch=%d sources=%s branchDependency=%s',
+                chosen['epoch'], report['sources'], report['branch_dependency'])
+    logger.info('Finished. Best %s=%.6f checkpoint=%s', cfg.selection_metric, best, out/primary_filename)
 
 
 if __name__ == '__main__':

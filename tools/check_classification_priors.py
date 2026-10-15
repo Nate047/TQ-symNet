@@ -5,6 +5,8 @@ Run check_classification_runtime.py on the server for the real CUDA encoder.
 import argparse
 import runpy
 import sys
+import tempfile
+from types import SimpleNamespace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -104,8 +106,13 @@ def main():
             assert not module.training and state_sha256(module) == before
             assert all(p.grad is None and not p.requires_grad for p in module.parameters())
         model.eval()
+        head.capture_diagnostics = True
         with torch.no_grad():
             output = model(image[:1])
+            assert set(head.image_diagnostics['counterfactual_logits']) == set(head.branch_names[1:])
+            for values in head.image_diagnostics['counterfactual_logits'].values():
+                assert values.shape == (1, 3) and np.isfinite(values).all()
+            assert head.image_diagnostics['branch_gates'].shape == (1, 3, len(head.branch_names))
             clone = PriorClassQueryHead(in_channels=16, embed_dim=32, scale_fusion='learned',
                                        use_sym=sym, use_lbp=lbp, use_gabor=gabor, texture_grid=8).eval()
             clone.load_state_dict(head.state_dict(), strict=True)
@@ -126,6 +133,23 @@ def main():
         if cfg.get('classification_head') == 'prior_query':
             PriorClassQueryHead(**cfg['classification_options'])
     print('PASS: config inheritance, 59-bin mapping, normalized DC-free quadrature kernels')
+    from TQ_SymNet.classification_diagnostics import accuracy_key, error_type, export_diagnostics, summarize_history
+    a = dict(accuracy=.95, tb_sensitivity=.90, tb_specificity=.98)
+    b = dict(accuracy=.95, tb_sensitivity=.91, tb_specificity=.97)
+    assert accuracy_key(b) > accuracy_key(a)
+    assert accuracy_key(a) == accuracy_key(dict(a))  # Strict > retains earlier tie.
+    assert error_type(2, 0) == 'TB->Healthy' and error_type(1, 2) == 'Sick->TB'
+    data = SimpleNamespace(labels=[2, 1, 0], image_ids=[1, 2, 3],
+                           filenames=['tb/a.png', 'sick/b.png', 'health/c.png'])
+    probabilities = np.array([[.6, .1, .3], [.1, .2, .7], [.8, .1, .1]])
+    evidence = dict(probabilities=probabilities, logits=np.log(probabilities))
+    with tempfile.TemporaryDirectory(dir=str(ROOT)) as temp:
+        report = export_diagnostics(Path(temp)/'epoch_02', data, evidence, dict(epoch=2))
+        assert report['sources']['ALL']['fn'] == 1 and report['sources']['ALL']['fp'] == 1
+        assert (Path(temp)/'epoch_02/tb_false_negative.csv').read_text(encoding='utf-8-sig').count('tb/a.png') == 1
+        summarize_history(temp)
+        assert (Path(temp)/'error_history.csv').is_file()
+    print('PASS: Accuracy/Sensitivity/Specificity lexicographic selection, branch diagnostics')
     try:
         import cv2  # noqa: F401
     except ImportError:

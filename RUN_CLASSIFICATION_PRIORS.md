@@ -85,6 +85,8 @@ combined model; C8 versus C3 tests CLAHE alone. Run C7-C10 first if budget limit
 12. configs/classification/c12_query_sym_texture.py
 13. configs/classification/c13_query_sym_texture_clahe.py
 14. RUN_CLASSIFICATION_PRIORS.md
+15. TQ_SymNet/classification_diagnostics.py (new)
+16. configs/classification/c3_crossscale_query_adaptive.py (Accuracy selection, 2-epoch diagnostic interval)
 
 Keep existing C0-C6 config bases, classification_consistency.py, runtime/head
 checkers and all detection files. No dataset annotation or M2 checkpoint change.
@@ -131,10 +133,23 @@ or overwrite. AMP is not enabled. Preserve one optimizer update per image batch.
 - [CLS-VAL]: Accuracy, AUC, Sensitivity, Specificity, confusion matrix, loss.
 - [CLS-VAL-TBX11K]: same metrics restricted to original TBX11K val; avoids mixing
   external MC/Shenzhen and DA/DB improvements with benchmark improvements.
-- val_predictions_epoch_XX.npz: image IDs, filenames, labels and three-class
-  probabilities in validation index order; supports FN/FP and complementarity.
-- latest.pth, best_cls_auc.pth (existing primary policy), and additionally
-  best_cls_accuracy.pth. Do not choose a checkpoint based on online-test results.
+- diagnostics/epoch_02,04,...,12/: all_predictions.csv/json.gz, all_errors.csv,
+  tb_false_negative.csv, tb_false_positive.csv, predictions.npz and summary.json.
+  These retain filenames AND IDs, sources, GT/prediction, 3 logits/probabilities,
+  TB decision margins and config/weight/data hashes. No per-image dump on odd epochs.
+- diagnostics/error_history.csv: error counts and prediction flips across sampled
+  epochs (not all epochs). Metrics and checkpoint selection still run every epoch.
+- diagnostics/best/: one extra final pass on the selected best checkpoint (even
+  if its epoch is odd). Includes per-image branch removal predictions with other
+  branch gates renormalized, helped/hurt counts, class-specific branch gates, and
+  bounded spatial attention examples (up to 8 per GT/predicted class pair). These
+  maps are NPZ arrays plus a JSON index; not pre-rendered heatmap PNGs. Removing a
+  trained branch is an inference dependency check, not a retraining ablation.
+- latest.pth, best_cls_accuracy.pth (PRIMARY) and best_cls_auc.pth (secondary).
+  Select on complete-val Accuracy; ties break by TB Sensitivity, then Specificity,
+  then earlier epoch. best_metrics.json describes the primary model. C3-C13 all
+  inherit this policy; optimization, loss, sampling and data splits are unchanged.
+  Do not choose a checkpoint based on online-test results.
 
 The classification checkpoint stores all new modules and input config. Existing
 export_classification.py reconstructs them strictly and applies the recorded

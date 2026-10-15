@@ -127,6 +127,9 @@ class PriorClassQueryHead(CrossScaleClassQueryHead):
         super().__init__(**kwargs)
         self.use_sym, self.use_lbp, self.use_gabor = use_sym, use_lbp, use_gabor
         self.texture_grid = int(texture_grid)
+        self.capture_diagnostics = False
+        self.image_diagnostics = {}
+        self.attention_maps = {}
         if self.texture_grid <= 0:
             raise ValueError('texture_grid must be positive')
         d, channels = self.embed_dim, kwargs.get('in_channels', 256)
@@ -157,11 +160,14 @@ class PriorClassQueryHead(CrossScaleClassQueryHead):
                 self.gabor = GaborEnergy(d)
                 self.gabor_read = nn.MultiheadAttention(d, self.heads, dropout=0., batch_first=True)
 
-    def read(self, query, feature, attention):
+    def read(self, query, feature, attention, name):
         h, w = feature.shape[-2:]
         tokens = feature.flatten(2).transpose(1, 2)
         keys = tokens + self._position(h, w, self.embed_dim, tokens.device, tokens.dtype)
-        response, weights = attention(query, keys, tokens, need_weights=self.collect_debug)
+        response, weights = attention(query, keys, tokens,
+                                      need_weights=self.collect_debug or self.capture_diagnostics)
+        if self.capture_diagnostics:
+            self.attention_maps[name] = weights.detach().reshape(-1, 3, h, w).cpu().numpy()
         entropy = None
         if self.collect_debug:
             weights = weights.detach().clamp_min(1e-8)
@@ -169,11 +175,12 @@ class PriorClassQueryHead(CrossScaleClassQueryHead):
         return response, entropy
 
     def enhance_local(self, local, global_feature, pyramid, images):
+        self.image_diagnostics, self.attention_maps = {}, {}
         query = self.visual_query(local + self.queries[None])
         responses, debug = [local], {}
         if self.use_sym:
-            levels = [self.read(query, module(feature), reader)[0]
-                      for feature, module, reader in zip(pyramid[1:], self.sym, self.sym_read)]
+            levels = [self.read(query, module(feature), reader, 'sym_p%d' % (i+3))[0]
+                      for i, (feature, module, reader) in enumerate(zip(pyramid[1:], self.sym, self.sym_read))]
             stacked = torch.stack(levels, 2)
             context = global_feature[:, None, None].expand_as(stacked)
             level_gate = self.sym_level_gate(torch.cat([stacked, context], -1)).squeeze(-1).softmax(-1)
@@ -190,7 +197,7 @@ class PriorClassQueryHead(CrossScaleClassQueryHead):
             for name, enabled in (('lbp', self.use_lbp), ('gabor', self.use_gabor)):
                 if enabled:
                     response, entropy = self.read(query, getattr(self, name)(gray, grid),
-                                                   getattr(self, name + '_read'))
+                                                   getattr(self, name + '_read'), name)
                     responses.append(response)
                     if self.collect_debug:
                         debug[name + '_attention_entropy'] = entropy.cpu().tolist()
@@ -204,6 +211,18 @@ class PriorClassQueryHead(CrossScaleClassQueryHead):
         if len(responses) > 1:
             prior[0] = math.log(4. * (len(responses)-1))
         gate = (gate_logits + prior).softmax(-1)
+        if self.capture_diagnostics:
+            if self.training:
+                raise RuntimeError('Branch removal diagnostics are evaluation-only')
+            alternatives = {}
+            for b, name in enumerate(self.branch_names[1:], 1):
+                changed_logits = (gate_logits + prior).clone()
+                changed_logits[:, :, b] = float('-inf')
+                changed = (stacked * changed_logits.softmax(-1)[..., None]).sum(2)
+                alternatives[name] = self.readout(torch.cat([
+                    changed, global_feature[:, None].expand_as(changed)], -1)).squeeze(-1).detach().cpu().numpy()
+            self.image_diagnostics = dict(branch_gates=gate.detach().cpu().numpy(),
+                                          counterfactual_logits=alternatives)
         if self.collect_debug:
             debug['prior_gate_by_class'] = gate.detach().mean(0).cpu().tolist()
             debug['prior_response_norm_by_class'] = stacked.detach().norm(dim=-1).mean(0).cpu().tolist()
