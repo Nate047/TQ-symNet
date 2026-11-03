@@ -183,10 +183,15 @@ class CandidateQualityAttention(nn.Module):
         entropy = -(attention * attention.clamp_min(1e-8).log()).sum(-1).mean((1, 2))
         return query + self.output_projection[projection](selected), entropy
 
-    def _score(self, boxes, *memories):
+    def _initial_query(self, boxes, geometry, memories):
+        # Default is byte-for-byte the historical geometry/token expression.
+        # New local-content experiments override this hook, not global reading.
+        return geometry[:, None] + self.query_tokens[None]
+
+    def _read_roles(self, boxes, *memories):
         center, size = (boxes[:, :2]+boxes[:, 2:])*.5, boxes[:, 2:]-boxes[:, :2]
         geometry = self.geometry(torch.cat((boxes, center, size), 1))
-        query = geometry[:, None] + self.query_tokens[None]
+        query = self._initial_query(boxes, geometry, memories)
         visual_levels, visual_entropy = [], []
         offset = 0
         for level in range(4):
@@ -230,8 +235,14 @@ class CandidateQualityAttention(nn.Module):
             gate = boxes.new_zeros((len(boxes), 3)); gate[:, 0] = 1.
             e0 = torch.stack(visual_entropy, 1).mean(1)
             entropy = torch.stack((e0, e0*0., e0*0.), 1)
-        logit = self.quality(torch.cat((fused.flatten(1), geometry), 1)).squeeze(1)
         diagnostics = torch.cat((gate, level_gate), 1)
+        return fused, geometry, diagnostics, entropy
+
+    def _score(self, boxes, *memories):
+        # Keep the historical arithmetic and return interface unchanged; the
+        # optional spatial auxiliary can read roles BEFORE this compression.
+        fused, geometry, diagnostics, entropy = self._read_roles(boxes, *memories)
+        logit = self.quality(torch.cat((fused.flatten(1), geometry), 1)).squeeze(1)
         return logit, diagnostics, entropy
 
     def forward(self, boxes, memories, training_checkpoint=False):

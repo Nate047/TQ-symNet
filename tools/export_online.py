@@ -10,6 +10,20 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 
+def configure_export_model(model_cfg, mode):
+    """Explicit supported models; do not weaken classifier/hidden-index checks."""
+    kind = model_cfg['type']
+    if kind == 'TQSymNet':
+        model_cfg['diagnostics'] = False
+        model_cfg['inference_mode'] = mode
+        return True
+    if kind not in ('TQDetector', 'TQDenseHeadBaseline') or mode != 'tb':
+        raise ValueError('Export requires TQSymNet, or TQDetector/TQDenseHeadBaseline in TB mode')
+    if kind == 'TQDenseHeadBaseline':
+        model_cfg['diagnostics'] = False
+    return False
+
+
 def load_external_classification(txt, image_ids, annotation):
     """Read official-example rows: line n corresponds to official image ID n.
 
@@ -61,11 +75,15 @@ def main():
         help='Diagnostic ONLY: official-example TXT, row n = official image ID n; no backbone match implied')
     parser.add_argument('--cls-filter', action='store_true',
                         help='Official Sym rule: run detection only where class argmax is TB')
+    parser.add_argument('--allow-independent-classifier-control', action='store_true',
+                        help='Explicit detector ablation: reuse our independent C20 TXT with a different detector encoder')
     args = parser.parse_args()
     cfg = Config.fromfile(args.config)
     cfg.model.backbone.pretrained = None
-    cfg.model.diagnostics = False
-    cfg.model.inference_mode = args.mode
+    quality_model = configure_export_model(cfg.model, args.mode)
+    if args.allow_independent_classifier_control and (
+            not args.classification_txt or not args.cls_filter or args.allow_development_split):
+        raise ValueError('Independent classifier control requires our TXT, cls-filter and hidden-test index')
     cfg.data.test.test_mode = True
     annotation = Path(cfg.data.test.ann_file)
     if not args.allow_development_split and 'test' not in annotation.stem.lower():
@@ -116,15 +134,25 @@ def main():
     if list(dataset.img_ids) != image_ids:
         raise ValueError('Dataset changed official test image order/IDs')
     model = build_detector(cfg.model)
-    # Full network checkpoints must contain the quality scorer, not just the detector.
-    checkpoint, checkpoint_audit = load_retained_checkpoint(model, args.checkpoint)
+    # Quality export still requires the complete scorer; a foundation control
+    # loads only its audited backbone/neck/head rather than random quality weights.
+    from TQ_SymNet.checkpoints import load_detector_checkpoint
+    load = load_retained_checkpoint if quality_model else load_detector_checkpoint
+    checkpoint, checkpoint_audit = load(model, args.checkpoint)
+    encoder_match = None
     if classification_manifest is not None:
         independent = classification_manifest.get('encoder_mode') == 'independent_classifier_copy'
         expected_backbone = (classification_manifest['detector_source_backbone_sha256'] if independent
                              else classification_manifest['backbone_sha256'])
-        if state_sha256(model.backbone) != expected_backbone:
+        backbone_match = state_sha256(model.backbone) == expected_backbone
+        neck_match = (not independent or state_sha256(model.neck) ==
+                      classification_manifest['detector_source_neck_sha256'])
+        encoder_match = backbone_match and neck_match
+        if args.allow_independent_classifier_control and not independent:
+            raise ValueError('A shared-encoder classifier cannot be detached from its source detector')
+        if not backbone_match and not args.allow_independent_classifier_control:
             raise ValueError('Detection backbone differs from the audited classifier initialization source')
-        if independent and state_sha256(model.neck) != classification_manifest['detector_source_neck_sha256']:
+        if not neck_match and not args.allow_independent_classifier_control:
             raise ValueError('Detection neck differs from the audited classifier initialization source')
     model.CLASSES = checkpoint.get('meta', {}).get('CLASSES', dataset.CLASSES)
     model.quality_collect = False
@@ -174,7 +202,13 @@ def main():
         Path(classification_txt).write_bytes(Path(args.external_classification_txt).read_bytes())
         mmcv.dump(external_manifest, str(prefix) + '.classification.manifest.json')
     manifest = dict(mode=args.mode, images=len(image_ids), detections=len(detections),
+                    detector_type=cfg.model.type, bbox_head_type=cfg.model.bbox_head.type,
+                    supplement_contract=checkpoint.get('meta', {}).get('tq_supplement'),
                     annotation=str(annotation), checkpoint=args.checkpoint,
+                    checkpoint_sha256=file_sha256(args.checkpoint),
+                    independent_classifier_control=args.allow_independent_classifier_control,
+                    classifier_initial_encoder_matches_detector=encoder_match,
+                    detector_inference_nms=getattr(model.module, 'inference_nms', None),
                     image_ids_in_order=image_ids, results=result_files,
                     classification_txt=classification_txt, cls_filter=args.cls_filter,
                     classification_source=('external_official_example' if external_manifest is not None
@@ -183,7 +217,8 @@ def main():
                                            else 'own_frozen_classifier' if classification_manifest is not None
                                            else 'none'),
                     experiment_role=('external_classifier_diagnostic' if external_manifest is not None
-                                     else 'own_model_export'),
+                                     else 'shared_independent_classifier_detector_control'
+                                     if args.allow_independent_classifier_control else 'own_model_export'),
                     classification_txt_sha256=(external_manifest['txt_sha256']
                         if external_manifest is not None else classification_manifest.get('txt_sha256')
                         if classification_manifest is not None else None),

@@ -1,0 +1,127 @@
+{
+  "experiment": "G1_geometry_winner_R0_ROI_complete",
+  "date": "2026-10-28",
+  "scope": "Frozen original M2; eight new quality epochs; batch2; learned alpha; no AMP; no quality warmstart; PyTorch 1.10 stable-sort compatibility fix",
+  "files": [
+    {
+      "path": "configs/publication_alpha/_original_a0.py",
+      "sha256": "1f159838f32a39f64d4a161101326a0870c699635511949e054bcd5417af8edc"
+    },
+    {
+      "path": "configs/quality_choice/_common.py",
+      "sha256": "1a7ab9ae046e8861c3bfd7c75635a9ddc3ebd782dd7d5cc45b06d30f20075e1f"
+    },
+    {
+      "path": "configs/quality_choice/g1_f2_geometry_winner.py",
+      "sha256": "fe5833725ed3c1976f6ddf8fc4e1bb838972094b6b53cbc2a3fb73da66deec46"
+    },
+    {
+      "path": "configs/quality_choice/r0_roi_complete_recipe.py",
+      "sha256": "4906a462787c8ff8e4965acfbc93438cf598a65f0593db3f300ff9418f31161a"
+    },
+    {
+      "path": "configs/roi_role_query/_common.py",
+      "sha256": "f3d926b07cf4010b55105fe612203bdaf8c8a31913570b30d02f263ed2f0d0e5"
+    },
+    {
+      "path": "configs/roi_role_query/a0_distribution_threshold.py",
+      "sha256": "b49e49ac8a6112ab4deddc888101917d84aa0e2052425ba38eafe28d5d5ca596"
+    },
+    {
+      "path": "configs/roi_role_query/a0_original_learned_alpha.py",
+      "sha256": "3f4309e100c7d3019cf69ed50fc5ed934a4102c2677f9a13434cd17a3b61ac30"
+    },
+    {
+      "path": "configs/roi_role_query/f1_roi_content_query.py",
+      "sha256": "e73c7c3a3b7899a5d28c05782b2660f2bf436ce22f99512c6381576e0c76a660"
+    },
+    {
+      "path": "configs/roi_role_query/f2_roi_paired_query.py",
+      "sha256": "9b2e03135745dfa20c17740b74c619b11db2a01ddfe06b5c83a0eccfa95fe2b2"
+    },
+    {
+      "path": "RUN_QUALITY_CHOICE.md",
+      "sha256": "91a0b162cc57c4d8b3c8d9293c4caa1a19b9129b431f24460929e1845a599030"
+    },
+    {
+      "path": "tools/check_quality_choice.py",
+      "sha256": "454adbf48c61702b085cd989d2ecebfbae03abd3619ca114c394ebaa934a6ed7"
+    },
+    {
+      "path": "tools/check_roi_threshold.py",
+      "sha256": "2d5354ba633c064c896235c666a9c4037848a1e649c396abb3498871605d9aac"
+    },
+    {
+      "path": "tools/check_structure.py",
+      "sha256": "1fda13242ac2b3f40f8959d5c5623e3cf06f20e395ca5227aa362d4c483f93d2"
+    },
+    {
+      "path": "tools/test_geometry_winner.py",
+      "sha256": "2bc9c5c4b7b1f6f5e3554b6a3b9f4db1122bd4d821c9b23a63a266d874bf906a"
+    },
+    {
+      "path": "tools/test_roi_oracle_smoke.py",
+      "sha256": "77537aab65e75ed77796bb2686e585fd5b9960452795b8f72ea909c50b901d62"
+    },
+    {
+      "path": "tools/test_roi_query.py",
+      "sha256": "9e3e0d640786720515b55e00bbc3370ea7068535cf42d6b22a296213eeb4655c"
+    },
+    {
+      "path": "tools/test_threshold_distribution.py",
+      "sha256": "08f015308ce2ddcd808f8ff849c841031b6770668ca3743fef34ec2d7e5db660"
+    },
+    {
+      "path": "tools/verify_roi_threshold_migration.py",
+      "sha256": "9465ef0176d3acd2b87d60b087c63f789f95b2165a31979e14e175d4d34b4203"
+    },
+    {
+      "path": "TQ_SymNet/alpha_experiment.py",
+      "sha256": "356c03125a8ae5ea77521b8256bad6caab2907c085882f19d8c64c78332ed2d9"
+    },
+    {
+      "path": "TQ_SymNet/geometry_winner_math.py",
+      "sha256": "12696499d54638fcfcc7fab1902cc17275c8b000f2bb976c2614f43a318daa54"
+    },
+    {
+      "path": "TQ_SymNet/models/attention.py",
+      "sha256": "daee4cf85e3822ff9ca600d0afb999a3adc7f5965592119dd4a9a8040b751f30"
+    },
+    {
+      "path": "TQ_SymNet/models/geometry_winner.py",
+      "sha256": "a80aa0c48caca34f7079088ff931a574055c086d31e44bd424ae29731b14c5ca"
+    },
+    {
+      "path": "TQ_SymNet/models/light_quality.py",
+      "sha256": "33136d0fbe33782bd63050727fe3dd94ec2260798227aeb806313ac4c91eec8f"
+    },
+    {
+      "path": "TQ_SymNet/models/network.py",
+      "sha256": "55f23dfb6780e985fda1d5dc2db06574b75ad21d6206fcd71c3dc5c5540918cb"
+    },
+    {
+      "path": "TQ_SymNet/models/roi_query.py",
+      "sha256": "422fe258efa32010e0731037a9595535c0b466259f9616cba6190a9188b8fdef"
+    },
+    {
+      "path": "TQ_SymNet/models/selection.py",
+      "sha256": "6f9a229d217e8226e3658974d9fa3a8f329d4920c8c99fcfc52c0ae1f4ac7c26"
+    },
+    {
+      "path": "TQ_SymNet/models/threshold_distribution.py",
+      "sha256": "e49d9cc4b0f47d4ceb740be4b907e370ed16e2a85000561851edb5b8534e174c"
+    },
+    {
+      "path": "TQ_SymNet/roi_query_math.py",
+      "sha256": "db4d9e6a19ed185d0c4fce1b5e2e8816aef0d0168e729da16c1e054e7111a197"
+    },
+    {
+      "path": "TQ_SymNet/supplement_smoke.py",
+      "sha256": "1fc64f360e0b61dc7322104b9fd9012e9af7d4a9d937c653e833cf1bcae8aff7"
+    },
+    {
+      "path": "TQ_SymNet/threshold_distribution_math.py",
+      "sha256": "2740f372ddd709706dd1f154f960b97b41039b8177609309923ceefba1a75034"
+    }
+  ]
+}

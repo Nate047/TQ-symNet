@@ -1,0 +1,95 @@
+{
+  "experiment": "F1_F2_A0_distribution_learned_alpha",
+  "revision": "r2-querygate-oracle",
+  "date": "2026-10-27",
+  "files": [
+    {
+      "path": "TQ_SymNet/models/attention.py",
+      "sha256": "1b26b0ba6c2ffd4aa53e9b83f3186285b9ff3cf94727e8081e1d5501461259f2"
+    },
+    {
+      "path": "TQ_SymNet/models/selection.py",
+      "sha256": "2f7e54df099f988ea0e30b3bdd41f6a58c3605ad105533389f1c33cdf15083e6"
+    },
+    {
+      "path": "TQ_SymNet/models/roi_query.py",
+      "sha256": "8c0fce5dac4923779cea437673204e483e5d4993cd6d3f4f6c8c14f38b911992"
+    },
+    {
+      "path": "TQ_SymNet/models/threshold_distribution.py",
+      "sha256": "e49d9cc4b0f47d4ceb740be4b907e370ed16e2a85000561851edb5b8534e174c"
+    },
+    {
+      "path": "TQ_SymNet/roi_query_math.py",
+      "sha256": "db4d9e6a19ed185d0c4fce1b5e2e8816aef0d0168e729da16c1e054e7111a197"
+    },
+    {
+      "path": "TQ_SymNet/threshold_distribution_math.py",
+      "sha256": "2740f372ddd709706dd1f154f960b97b41039b8177609309923ceefba1a75034"
+    },
+    {
+      "path": "TQ_SymNet/alpha_experiment.py",
+      "sha256": "356c03125a8ae5ea77521b8256bad6caab2907c085882f19d8c64c78332ed2d9"
+    },
+    {
+      "path": "TQ_SymNet/supplement_smoke.py",
+      "sha256": "1fc64f360e0b61dc7322104b9fd9012e9af7d4a9d937c653e833cf1bcae8aff7"
+    },
+    {
+      "path": "configs/publication_alpha/_original_a0.py",
+      "sha256": "1f159838f32a39f64d4a161101326a0870c699635511949e054bcd5417af8edc"
+    },
+    {
+      "path": "configs/roi_role_query/_common.py",
+      "sha256": "f3d926b07cf4010b55105fe612203bdaf8c8a31913570b30d02f263ed2f0d0e5"
+    },
+    {
+      "path": "configs/roi_role_query/a0_original_learned_alpha.py",
+      "sha256": "3f4309e100c7d3019cf69ed50fc5ed934a4102c2677f9a13434cd17a3b61ac30"
+    },
+    {
+      "path": "configs/roi_role_query/f1_roi_content_query.py",
+      "sha256": "e73c7c3a3b7899a5d28c05782b2660f2bf436ce22f99512c6381576e0c76a660"
+    },
+    {
+      "path": "configs/roi_role_query/f2_roi_paired_query.py",
+      "sha256": "9b2e03135745dfa20c17740b74c619b11db2a01ddfe06b5c83a0eccfa95fe2b2"
+    },
+    {
+      "path": "configs/roi_role_query/a0_distribution_threshold.py",
+      "sha256": "b49e49ac8a6112ab4deddc888101917d84aa0e2052425ba38eafe28d5d5ca596"
+    },
+    {
+      "path": "tools/test_roi_query.py",
+      "sha256": "9e3e0d640786720515b55e00bbc3370ea7068535cf42d6b22a296213eeb4655c"
+    },
+    {
+      "path": "tools/test_threshold_distribution.py",
+      "sha256": "906c914083abcdf272fb611e46bceb5680e9bb9fa65bd532cf0c03ec971b9cfd"
+    },
+    {
+      "path": "tools/check_roi_threshold.py",
+      "sha256": "7f89616e7519fe4acc3aa58633cee551c338bee0fdb57177a22aef7987d8357c"
+    },
+    {
+      "path": "tools/verify_roi_threshold_migration.py",
+      "sha256": "4709fb8417ed02363a536af829414100ee3191991d29b3ef32d54987ba08c911"
+    },
+    {
+      "path": "tools/check_structure.py",
+      "sha256": "1fda13242ac2b3f40f8959d5c5623e3cf06f20e395ca5227aa362d4c483f93d2"
+    },
+    {
+      "path": "RUN_ROI_THRESHOLD.md",
+      "sha256": "7c7e4a2771cf157211fc41705bb9a7bc5031acd918807f9137056f0bd0a92cc1"
+    },
+    {
+      "path": "TQ_SymNet/models/network.py",
+      "sha256": "55f23dfb6780e985fda1d5dc2db06574b75ad21d6206fcd71c3dc5c5540918cb"
+    },
+    {
+      "path": "tools/test_roi_oracle_smoke.py",
+      "sha256": "77537aab65e75ed77796bb2686e585fd5b9960452795b8f72ea909c50b901d62"
+    }
+  ]
+}

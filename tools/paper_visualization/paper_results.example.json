@@ -1,0 +1,34 @@
+{
+  "runs": [
+    {
+      "name": "C20_M2_SoftNMS",
+      "kind": "online",
+      "cohort": "official_hidden_test",
+      "source": "online_c20_m2_soft.txt",
+      "classification_txt": "../work_dirs/online_c20_a0/TQSymNet.txt",
+      "submission_id": "REPLACE_WITH_ACTUAL_ID",
+      "checkpoint": "work_dirs/m2_s0/best_official_tb_bbox_mAP_epoch_13.pth",
+      "classifier": "C20_epoch11"
+    },
+    {
+      "name": "C20_A0",
+      "kind": "online",
+      "cohort": "official_hidden_test",
+      "source": "online_c20_a0.txt",
+      "classification_txt": "../work_dirs/online_c20_a0/TQSymNet.txt",
+      "submission_id": "REPLACE_WITH_ACTUAL_ID",
+      "checkpoint": "work_dirs/a0_s0/best_official_tb_bbox_mAP_epoch_7.pth",
+      "classifier": "C20_epoch11"
+    },
+    {
+      "name": "A0_val",
+      "kind": "val_log",
+      "cohort": "original_TBX11K_val_only_TB_200",
+      "source": "../work_dirs/a0_s0/REPLACE_WITH_ACTUAL_LOG.log",
+      "selected_epoch": 7,
+      "expected_epochs": 8,
+      "annotation": "/home/data2/LiYingxian/Dataset_TB/TBX11K/annotations/json/TBX11K_val_only_tb.json",
+      "notes": "Verify this annotation against the actual log/config; do not mix 120-image split experiments."
+    }
+  ]
+}

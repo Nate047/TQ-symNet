@@ -1,0 +1,33 @@
+{
+  "date": "2026-10-26",
+  "revision": "r2_review_fixes",
+  "configuration_contracts_passed": 6,
+  "a10_a13_resolved_diff": "MLP hidden width and experiment tag only",
+  "a13_pooled_core_parameters": 2341713,
+  "full_reading_core_parameters": 2332599,
+  "core_parameter_ratio": 1.0039072296609919,
+  "numerical_tests_passed": [
+    "alpha 0/0.5/1 endpoints and invalid input",
+    "default ROI compatibility, widened MLP count, empty ROI and chunk equivalence",
+    "DGQP adapted forward and gradients match preserved mirrored forward_single",
+    "COCO all-area accumulation and repeated-image paired bootstrap"
+  ],
+  "preserved_detector_methods_passed": 16,
+  "git_diff_whitespace_check": "passed",
+  "original_coco_evaluator_modified": true,
+  "coco_change_scope": "Empty DT construction only in the three loadRes call sites. Nonempty loadRes, category matching, IoU thresholds, NMS and AP accumulation are unchanged; tested against real COCOeval.",
+  "review_regression_tests_passed": [
+    "empty predictions: category-aware, official pooled TB and merged TB branches, including subtype metrics",
+    "nonempty predictions retain official COCO results and input data",
+    "zero-initialized ROI head receives nonzero gradients and parameter updates while detector is unchanged",
+    "vacuous zero-gradient smoke is rejected",
+    "new dense-head online export allowed, unknown models/subtype misuse still rejected"
+  ],
+  "original_backbone_neck_sym_modified": false,
+  "training_or_new_inference_run": false,
+  "full_mmdet_runtime_smoke_run": false,
+  "real_data_smoke_run": false,
+  "real_data_smoke_available": "tools/check_publication_supplement.py --data-smoke: actual init/audit/EMA hooks, real train_step+optimizer, real one-image validation COCO; server execution required",
+  "runtime_limitation": "Windows PyTorch and COCO available; compatible MMCV/CUDA extensions unavailable. WSL Python has no torch/mmcv. Run supplied --build --smoke on the server before full training.",
+  "gflv2_source_status": "Preserved GitHub mirror; author repository returned 404. Source provenance is explicit, not claimed authenticated upstream byte identity."
+}

@@ -94,6 +94,22 @@ class RetinaNAMHighQualitySelector(RetinaNAMCandidateQuality):
     def _score_candidates(self, boxes, memory, sym, training=False):
         return self.candidate_quality(boxes, memory, training_checkpoint=training)
 
+    def _training_quality_predictions(self, boxes, memory, sym):
+        outputs, gate, entropy = self._score_candidates(boxes, memory, sym, True)
+        return outputs, gate, entropy, None
+
+    def _quality_element_loss(self, logit, target, actual, supervision):
+        # Historical scalar BCE; optional distribution experiments override
+        # this hook without duplicating sampling, rank or the training loop.
+        return F.binary_cross_entropy_with_logits(logit, target, reduction='none')
+
+    def _additional_supervised_loss(self, boxes, sym, gt, matched, actual, memory, meta, supervision):
+        return self._extra_training_loss(boxes, sym, gt, matched, actual, memory, meta)
+
+    def _replacement_rank_loss(self, logits, actual, matched, boxes):
+        # None selects the unchanged historical pair-rank implementation.
+        return None
+
     def _extra_training_loss(self, boxes, sym, gt, matched, actual, memory, meta):
         return self.candidate_quality.quality[-1].weight.sum() * 0.
 
@@ -221,12 +237,13 @@ class RetinaNAMHighQualitySelector(RetinaNAMCandidateQuality):
             full_candidate_losses.append(self._full_candidate_training_loss(
                 boxes, sym, gt, matched, actual, memory, meta,
                 scan.detach(), corrected_scan.detach()))
-            outputs, _, _ = self._score_candidates(normalized[ids], memory, sym[ids], True)
-            extra_losses.append(self._extra_training_loss(boxes[ids], sym[ids], gt,
-                matched[ids], actual[ids], memory, meta))
+            outputs, _, _, supervision = self._training_quality_predictions(
+                normalized[ids], memory, sym[ids])
+            extra_losses.append(self._additional_supervised_loss(boxes[ids], sym[ids], gt,
+                matched[ids], actual[ids], memory, meta, supervision))
             z, residual = outputs.unbind(1)
             target = self._quality_target(actual[ids])
-            element = F.binary_cross_entropy_with_logits(z, target, reduction='none')
+            element = self._quality_element_loss(z, target, actual[ids], supervision)
             classification.append(balanced_mean(element, actual[ids], matched[ids]))
             base_z = torch.logit(sym[ids, :-1].max(1)[0].clamp(1e-6, 1.-1e-6))
             # Explicit residual supervision; no BCE-driven saturation of the
@@ -251,7 +268,11 @@ class RetinaNAMHighQualitySelector(RetinaNAMCandidateQuality):
                     actual[ids], matched[ids]))
             counts['low'] += int((actual[ids] < .5).sum())
             counts['positive'] += int((actual[ids] >= .5).sum())
-            if self.selector_rank_weight > 0:
+            replacement_rank = self._replacement_rank_loss(z, actual[ids], matched[ids], normalized[ids])
+            if self.selector_rank_weight > 0 and replacement_rank is not None:
+                ranking.append(replacement_rank[0])
+                counts['pairs'] += replacement_rank[1]
+            elif self.selector_rank_weight > 0:
                 quality_only = getattr(self,'selector_quality_rank_only',False)
                 final_z = z if quality_only else torch.logit(
                     self._final_score(sym[ids],z,residual).clamp(1e-6,1.-1e-6))
@@ -496,8 +517,10 @@ class HighQualitySelectorDebugHook(Hook):
         totals = {key: sum(x[key] for x in model.selector_train_stats)
                   for key in ('low','positive','pairs','unreachable')}
         runner.logger.info('[SELECTOR-TRAIN] low/positive=%d/%d rankPairs=%d '
-            'boundUnreachable=%d targetAlignedMining=True separateResidual=True',
-            totals['low'],totals['positive'],totals['pairs'],totals['unreachable'])
+            'boundUnreachable=%d targetAlignedMining=True alphaCalibrationSeparate=True '
+            'activeRankLoss=%s',
+            totals['low'],totals['positive'],totals['pairs'],totals['unreachable'],
+            getattr(model,'active_rank_name','loss_selector_competition'))
         model.selector_train_stats = []
         if hasattr(model,'edge_stats'):
             count=sum(x['count'] for x in model.edge_stats)

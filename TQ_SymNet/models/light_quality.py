@@ -5,17 +5,23 @@ from torch.nn import functional as F
 
 
 class PooledQualityScorer(nn.Module):
-    def __init__(self, hidden=96, chunk=32, pool_size=5):
+    def __init__(self, hidden=96, chunk=32, pool_size=5, mlp_hidden=None):
         super().__init__()
         self.hidden, self.chunk, self.pool_size = hidden, chunk, pool_size
+        # Keep the historical projections/pooling unchanged. Capacity matching
+        # widens ONLY the two MLP layers (2*m -> m), not feature memories.
+        self.mlp_hidden = hidden if mlp_hidden is None else int(mlp_hidden)
+        if self.mlp_hidden < 1:
+            raise ValueError('mlp_hidden must be positive')
         self.heads = 6
         self.texture = self.lbp_enabled = self.gabor_enabled = False
         self.gaussian = self.edges = self.detail = self.checkpoint_candidates = False
         self.attention_stats = []
         self.visual_projection = nn.ModuleList([nn.Conv2d(256, hidden, 1) for _ in range(4)])
         self.quality = nn.Sequential(nn.LayerNorm(4*hidden+8),
-            nn.Linear(4*hidden+8, 2*hidden), nn.SiLU(),
-            nn.Linear(2*hidden, hidden), nn.SiLU(), nn.Linear(hidden, 1))
+            nn.Linear(4*hidden+8, 2*self.mlp_hidden), nn.SiLU(),
+            nn.Linear(2*self.mlp_hidden, self.mlp_hidden), nn.SiLU(),
+            nn.Linear(self.mlp_hidden, 1))
         nn.init.zeros_(self.quality[-1].weight)
         nn.init.zeros_(self.quality[-1].bias)
 

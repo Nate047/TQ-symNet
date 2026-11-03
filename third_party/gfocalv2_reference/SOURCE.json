@@ -1,0 +1,23 @@
+{
+  "original_repository": "https://github.com/implus/GFocalV2",
+  "original_access_status": "404 / Repository not found on 2026-10-26; upstream commit could not be authenticated",
+  "mirror_repository": "https://github.com/Yuqi-Hu-2001/GFocalV2-reference",
+  "mirror_commit": "a07d8a0d8dcf8bf9b13a5e810d896bdabf557c05",
+  "archive_path": "GFocalV2-master.zip",
+  "archive_sha256": "8e111ae6667f49c457807855852e2ecf351ae6318bb338e1f3be6fec0f208eb2",
+  "files": [
+    "mmdet/models/dense_heads/gfocal_head.py",
+    "mmdet/models/losses/gfocal_loss.py",
+    "configs/gfocal/gfocal_r50_fpn_1x.py"
+  ],
+  "license_note": "Archived README declares Apache-2.0 for MMDetection. Archive does not include the referenced LICENSE. Preserve provenance; verify rights before redistribution beyond this research project.",
+  "runtime_adapter": "TQ_SymNet/models/gflv2_adapter.py",
+  "adaptations": [
+    "Use bundled MMDet GFLHead assignment, DFL, regression reduction, initialization and batched decode",
+    "Preserve top-4 + top-4 mean per coordinate, 20->64->1 DGQP, sigmoid(cls)*quality",
+    "Convert joint probability once to logit for the local QFL/decoder API; clip only at FP32 extremes",
+    "Use P2-P5 from same TransNeXt/CrossScale; two TB subtypes; original 599/200 dataset",
+    "No upstream COCO scores or identical upstream full-run reproduction claimed"
+  ],
+  "source_authenticity": "Mirrored source matching published DGQP equations; not independently verified as byte-identical to the now-unavailable author repository"
+}

@@ -1,4 +1,5 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+import copy
 import itertools
 import logging
 import os.path as osp
@@ -17,6 +18,24 @@ from .builder import DATASETS
 from .custom import CustomDataset
 from .tbx11k_eval import (make_single_tb_ground_truth,
                           merge_tb_predictions)
+
+
+def _load_coco_results(coco_gt, predictions):
+    """Keep normal loadRes unchanged; represent zero detections legally.
+
+    pycocotools.loadRes([]) indexes its first item and raises IndexError.
+    An empty DT object lets COCOeval compute zero AP for present GT strata,
+    and retain -1 for strata with no GT. No dummy detections or score changes.
+    """
+    if predictions:
+        return coco_gt.loadRes(predictions)
+    coco_dt = COCO()
+    coco_dt.dataset = {key: copy.deepcopy(coco_gt.dataset[key])
+                       for key in ('images', 'categories', 'info', 'licenses')
+                       if key in coco_gt.dataset}
+    coco_dt.dataset['annotations'] = []
+    coco_dt.createIndex()
+    return coco_dt
 
 
 @DATASETS.register_module()
@@ -478,7 +497,7 @@ class CocoDataset(CustomDataset):
                         'of small/medium/large instances since v2.12.0. This '
                         'does not change the overall mAP calculation.',
                         UserWarning)
-                cocoDt = cocoGt.loadRes(predictions)
+                cocoDt = _load_coco_results(cocoGt, predictions)
             except IndexError:
                 print_log(
                     'The testing results of the whole dataset is empty.',
@@ -605,7 +624,7 @@ class CocoDataset(CustomDataset):
             # evaluate original two-class detections with category matching
             # disabled.  Do not merge predictions or add NMS here.
             predictions = mmcv.load(result_files['bbox'])
-            official_coco_dt = self.coco.loadRes(predictions)
+            official_coco_dt = _load_coco_results(self.coco, predictions)
             official_eval = COCOeval(self.coco, official_coco_dt, 'bbox')
             # The released TBX11K source hard-codes [1, 2, 3]. With useCats=0
             # COCOeval pools them into one category, including an empty third
@@ -644,7 +663,7 @@ class CocoDataset(CustomDataset):
             tb_coco_gt.dataset = make_single_tb_ground_truth(
                 self.coco.dataset)
             tb_coco_gt.createIndex()
-            tb_coco_dt = tb_coco_gt.loadRes(merged_predictions)
+            tb_coco_dt = _load_coco_results(tb_coco_gt, merged_predictions)
             tb_eval = COCOeval(tb_coco_gt, tb_coco_dt, 'bbox')
             tb_eval.params.catIds = [1]
             tb_eval.params.imgIds = self.img_ids

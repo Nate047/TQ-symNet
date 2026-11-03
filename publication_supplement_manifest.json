@@ -1,0 +1,301 @@
+{
+  "date": "2026-10-26",
+  "revision": "r2",
+  "type": "delta_for_existing_standalone_TQ_SymNet",
+  "files": [
+    {
+      "path": "PUBLICATION_SUPPLEMENT_AUDIT.json",
+      "bytes": 2160,
+      "sha256": "533e531d913e7fe04e6c0672991a9106fd855c8e262c3561abe9f24763b28ed7"
+    },
+    {
+      "path": "RUN_PUBLICATION_SUPPLEMENT.md",
+      "bytes": 11564,
+      "sha256": "f20515ebc8e52d73abe3ac5e04671f7202896c3667465ff7303b751c4769e18f"
+    },
+    {
+      "path": "TQ_SymNet/bootstrap_ap.py",
+      "bytes": 3229,
+      "sha256": "f5dc41aca4e12df4283e46af2b9a7912b881730793bbdaf8a092361289be95b6"
+    },
+    {
+      "path": "TQ_SymNet/models/gflv2_adapter.py",
+      "bytes": 1590,
+      "sha256": "e8324126a5ce6984442d9ec57d79dd842eff072b97fd616c1e2f363a038b033a"
+    },
+    {
+      "path": "TQ_SymNet/models/light_quality.py",
+      "bytes": 3049,
+      "sha256": "33136d0fbe33782bd63050727fe3dd94ec2260798227aeb806313ac4c91eec8f"
+    },
+    {
+      "path": "TQ_SymNet/models/network.py",
+      "bytes": 5810,
+      "sha256": "be0c20fc4f9bcf14493225e95678a7d1deab15deeca5822d1a2b8cf0d5c470c3"
+    },
+    {
+      "path": "TQ_SymNet/supplement.py",
+      "bytes": 11807,
+      "sha256": "35322e7678f1fa00f4dd89f6b7729485ebfefb62b63c5038096bc1dd5c1abc5e"
+    },
+    {
+      "path": "TQ_SymNet/supplement_math.py",
+      "bytes": 1474,
+      "sha256": "5b8a02e909d9d9c1aeb38d673fd6cfddbb91209d2231cff8d1739c20664b17fd"
+    },
+    {
+      "path": "TQ_SymNet/supplement_smoke.py",
+      "bytes": 3744,
+      "sha256": "1fc64f360e0b61dc7322104b9fd9012e9af7d4a9d937c653e833cf1bcae8aff7"
+    },
+    {
+      "path": "configs/publication_alpha/_original_a0.py",
+      "bytes": 15400,
+      "sha256": "1f159838f32a39f64d4a161101326a0870c699635511949e054bcd5417af8edc"
+    },
+    {
+      "path": "configs/publication_supplement/_dense.py",
+      "bytes": 2759,
+      "sha256": "5091a9e58ae332e78ef377d07c601fe6487fe5fe38c25f1ef2b5de1b728f0aad"
+    },
+    {
+      "path": "configs/publication_supplement/_roi.py",
+      "bytes": 1511,
+      "sha256": "d6050731849eaa1288b8b2e027d968ead6cc29cf21d78d1d78792af927c65587"
+    },
+    {
+      "path": "configs/publication_supplement/a10_roi_original.py",
+      "bytes": 179,
+      "sha256": "22ee12def7badaa00728078331a68b2f697eaf3d73b60650d64814ae383eb91d"
+    },
+    {
+      "path": "configs/publication_supplement/a12_full_original.py",
+      "bytes": 1300,
+      "sha256": "c27f0611a2bcacb159e1bce4b623a4e97b033833b2c12bec3d6529b2f8e32dd0"
+    },
+    {
+      "path": "configs/publication_supplement/a13_roi_capacity.py",
+      "bytes": 173,
+      "sha256": "7cc6bd42e3135764818111033188d093e50850feff96f64a24afd4aca5b49d89"
+    },
+    {
+      "path": "configs/publication_supplement/gfl_joint.py",
+      "bytes": 144,
+      "sha256": "0d6068618923028561f7aa91b5818b54e86512e5b30f21cec5569e6d0cae0955"
+    },
+    {
+      "path": "configs/publication_supplement/gflv2_joint.py",
+      "bytes": 228,
+      "sha256": "6e78cffb16a82eb0320c7069d9f7d76a3705d58c279f2501b23248adc0919644"
+    },
+    {
+      "path": "configs/publication_supplement/test_online_gfl.py",
+      "bytes": 308,
+      "sha256": "3342049c229d46cc1879b15e5091e4e0f3b332a4961a9319938ae342f6f4d99d"
+    },
+    {
+      "path": "configs/publication_supplement/test_online_gflv2.py",
+      "bytes": 312,
+      "sha256": "889b8100bb99b5e4c84778ae62e0bfff837c5a7aba523d9ffb287bed49df894c"
+    },
+    {
+      "path": "configs/publication_supplement/test_online_vfnet.py",
+      "bytes": 325,
+      "sha256": "f35e64432381ba006dba14566cad8afaad2ed8e3df7139a59ca352a73a4b01a1"
+    },
+    {
+      "path": "configs/publication_supplement/vfnet_joint.py",
+      "bytes": 837,
+      "sha256": "1ec0bdb5e1246cbc06b0dc4a6cfc1a4da73e6ff2b72f49dd60c0d97ca80cd7d6"
+    },
+    {
+      "path": "mmdet/datasets/coco.py",
+      "bytes": 30420,
+      "sha256": "555cd87fb5a26f5f3d884bdc02afc60194d6281746564afaccea719097a44b41"
+    },
+    {
+      "path": "third_party/gfocalv2_reference/SOURCE.json",
+      "bytes": 1529,
+      "sha256": "cf655b4acbb5dfda95543385e3155ff236da71b7ecab774670048628e8051864"
+    },
+    {
+      "path": "third_party/gfocalv2_reference/gfocal_head.py.reference",
+      "bytes": 28346,
+      "sha256": "6d078cf8019ad027bfdfa806b19a1cb1d7bd649154126602c7d8fd6dcc99fd1a"
+    },
+    {
+      "path": "third_party/gfocalv2_reference/gfocal_loss.py.reference",
+      "bytes": 7336,
+      "sha256": "806870951958731dafc0baa5785c0463b3d5efb386e6662e434b189f1370aaa1"
+    },
+    {
+      "path": "third_party/gfocalv2_reference/gfocal_r50_fpn_1x.py.reference",
+      "bytes": 3863,
+      "sha256": "fd747c073381faa4bb7c0e39d7636cf29f3fdf40bc11afac2ab904715430e5a8"
+    },
+    {
+      "path": "tools/analysis_tools/export_supplement_candidates.py",
+      "bytes": 4392,
+      "sha256": "492bc4a7845f8153bad50da8919cb4306237167d9383853059ce42179f9d4fc9"
+    },
+    {
+      "path": "tools/analysis_tools/sweep_scalar_alpha.py",
+      "bytes": 10627,
+      "sha256": "72a45d020957b06065d1d97a738c099a15f89ecda67740bfd6d6890cfa9e8d5f"
+    },
+    {
+      "path": "tools/benchmark_cost.py",
+      "bytes": 16363,
+      "sha256": "51932c8ba7ef12fc985d611a8c2cf4fc5132081b805aefa57891692d1a84791c"
+    },
+    {
+      "path": "tools/check_publication_supplement.py",
+      "bytes": 13067,
+      "sha256": "fa881f5bed76af7deca703ee18587458bd1d4351d80419fe9fc76ed5375e633d"
+    },
+    {
+      "path": "tools/export_online.py",
+      "bytes": 14403,
+      "sha256": "a5981c2ee72253e0997d53747bcab1630919c89f31f496102a5bcbd728196a83"
+    },
+    {
+      "path": "tools/package_publication_supplement.py",
+      "bytes": 4759,
+      "sha256": "5983f8597e1e149d671e551b080e7f7c37766b33ef44e70cbf4da32dbbbdf2a7"
+    },
+    {
+      "path": "tools/test_publication_fixes.py",
+      "bytes": 6546,
+      "sha256": "e82a514877014380f463ca9ce433918752e3e871286d5510c1d66de7d8b24b55"
+    },
+    {
+      "path": "tools/test_publication_supplement.py",
+      "bytes": 7259,
+      "sha256": "554d93560a275e7ac4a97431c47c8bb8f1af14b6bcc3c8b6d3b28af94f1789d8"
+    },
+    {
+      "path": "tools/verify_publication_supplement.py",
+      "bytes": 1029,
+      "sha256": "d5a2a481a4b33103302fea124528fefa8758193a23f14a2dfd195012c2bbdcf8"
+    }
+  ],
+  "dependencies": [
+    {
+      "path": "TQ_SymNet/models/attention.py",
+      "bytes": 14751,
+      "sha256": "6ee9ab38b3a9f7be64d2aae9fd4884787e289251fae5cf9d30994cccaf567816"
+    },
+    {
+      "path": "TQ_SymNet/models/edges.py",
+      "bytes": 11526,
+      "sha256": "4023a27ce61c9d3665458f569d175adc7e196f9776713d0542fa9caec6b09e41"
+    },
+    {
+      "path": "TQ_SymNet/models/detail.py",
+      "bytes": 24856,
+      "sha256": "b7364c77d666104d8a76b5e4fc4561f3dfcb986acded5fda16011353dcd71de5"
+    },
+    {
+      "path": "TQ_SymNet/models/candidates.py",
+      "bytes": 26436,
+      "sha256": "bda1b11d83f6354fd7297c8a27343bdb0bdd1a6993505a31615d44efd23f2dcf"
+    },
+    {
+      "path": "TQ_SymNet/models/detector.py",
+      "bytes": 9621,
+      "sha256": "6f1cc774694c3a274faf44355ff386fdd5e855c708f84fbed31519adc4114ba2"
+    },
+    {
+      "path": "TQ_SymNet/models/head.py",
+      "bytes": 38550,
+      "sha256": "73f2b25d346846b0d20351460fa21c9eb3aced29c8415d3fab1d3ad40daaeb45"
+    },
+    {
+      "path": "TQ_SymNet/models/neck.py",
+      "bytes": 35844,
+      "sha256": "7fa27742a6f6e4cfa13684135618bc9e7192759b4e0fd21a64928e9f76739f83"
+    },
+    {
+      "path": "TQ_SymNet/models/__init__.py",
+      "bytes": 340,
+      "sha256": "bcb39946968cb45bc1d09c3944451037ae5039c2643d4e616e24456e409e155a"
+    },
+    {
+      "path": "TQ_SymNet/checkpoints.py",
+      "bytes": 5787,
+      "sha256": "77af8a36165eb7056508c133f7056a65ddb82310ac5b3a73e44bebb626f0e011"
+    },
+    {
+      "path": "TQ_SymNet/alpha_experiment.py",
+      "bytes": 8449,
+      "sha256": "356c03125a8ae5ea77521b8256bad6caab2907c085882f19d8c64c78332ed2d9"
+    },
+    {
+      "path": "TQ_SymNet/data_contract.py",
+      "bytes": 3167,
+      "sha256": "2032577db8d2d9855e2bba93e70a5d0af5f02f3f3373669d20e3d7ee2000421b"
+    },
+    {
+      "path": "mmdet/models/dense_heads/gfl_head.py",
+      "bytes": 28157,
+      "sha256": "3b1e630daa55805711b11ac2551c8c6a9c6aba500d01576c6ce15718c3df3a93"
+    },
+    {
+      "path": "mmdet/models/dense_heads/vfnet_head.py",
+      "bytes": 34936,
+      "sha256": "f2cca0f0a63b8f2f628f22960752ee429880a9241f071f8d9443370961a26108"
+    },
+    {
+      "path": "mmdet/models/dense_heads/anchor_head.py",
+      "bytes": 34505,
+      "sha256": "f75b6cd7f5f8c28cb268dfc2180c01c5be5fd0589660957938b6f35f4b51b328"
+    },
+    {
+      "path": "mmdet/models/losses/gfocal_loss.py",
+      "bytes": 7458,
+      "sha256": "196d52be4b2ecd390ae8a214ea0dc331a261a734e5ca4b297f299a553368a0a7"
+    },
+    {
+      "path": "mmdet/models/losses/varifocal_loss.py",
+      "bytes": 5365,
+      "sha256": "ed9364a762f58a0fc096fb7abb9124540d7f33296640790a4324e5a9937edabd"
+    },
+    {
+      "path": "mmdet/core/evaluation/eval_hooks.py",
+      "bytes": 2622,
+      "sha256": "71680e95e4ae644f9723eb75dd2e7ed211b81222bcb3004c384de1ac85007521"
+    },
+    {
+      "path": "mmdet/core/hook/ema.py",
+      "bytes": 5150,
+      "sha256": "255d0d63865735bd2fe661cc1c4f375c68e7834aee0446e27eaaa861c7106663"
+    },
+    {
+      "path": "tools/train.py",
+      "bytes": 9414,
+      "sha256": "43a24aea6a0a657dfc1871c8352db992e6935cfb9aa35e272d546b45a740edb9"
+    },
+    {
+      "path": "tools/test.py",
+      "bytes": 11864,
+      "sha256": "0fcb874193860b5a2e8b026adebed002221e779f6e5a1ccf883444e12437c27e"
+    },
+    {
+      "path": "tools/check_structure.py",
+      "bytes": 11481,
+      "sha256": "1fda13242ac2b3f40f8959d5c5623e3cf06f20e395ca5227aa362d4c483f93d2"
+    }
+  ],
+  "protocol": "599/200, not 479/120/200",
+  "validation": "Local numerical/config tests passed; full MMDet/CUDA smoke must pass on server.",
+  "changed_existing": [
+    "TQ_SymNet/models/light_quality.py",
+    "TQ_SymNet/models/network.py",
+    "tools/analysis_tools/sweep_scalar_alpha.py",
+    "tools/benchmark_cost.py",
+    "mmdet/datasets/coco.py",
+    "tools/export_online.py"
+  ],
+  "data_and_weights_included": false,
+  "base_commit": "050859119792bed4a3958cd43b1b0446b101daf5"
+}

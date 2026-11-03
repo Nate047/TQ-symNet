@@ -1,0 +1,63 @@
+{
+  "experiment": "F2_G1_epoch8_to_epoch12_single_GPU5",
+  "date": "2026-10-29",
+  "scope": "Incremental overlay onto the already-running F2/G1 project; unchanged networks/losses, resume AdamW/alpha, explicit four-epoch low-LR phase; no checkpoint/data files",
+  "files": [
+    {
+      "path": "TQ_SymNet/roi_query_continuation.py",
+      "sha256": "2f3b9d218398d2116bfea0c4650fc1de0844d063f2d3c36a6cb518368dc587cc"
+    },
+    {
+      "path": "TQ_SymNet/geometry_winner_continuation.py",
+      "sha256": "fc23d3cd1730e0fb298049dd2843f4231698d432fa5640082ca068e77ca3e66f"
+    },
+    {
+      "path": "TQ_SymNet/geometry_winner_math.py",
+      "sha256": "12696499d54638fcfcc7fab1902cc17275c8b000f2bb976c2614f43a318daa54"
+    },
+    {
+      "path": "configs/roi_role_query/f2_continue_e8_e12.py",
+      "sha256": "f6013b1926acd6437ed10a8535738fab4c7c19de3205ee432bc3591ab137dc22"
+    },
+    {
+      "path": "configs/quality_choice/g1_continue_e8_e12.py",
+      "sha256": "f6ffcd434427382572153cb9cba8e7bf796901d2cbe05cd37f7dad7a72119a36"
+    },
+    {
+      "path": "tools/test_f2_continuation.py",
+      "sha256": "61ae08008e2f76a4a10f715076b6835fc3d585d0c8fab1ca7c8c427ceb42afb6"
+    },
+    {
+      "path": "tools/test_g1_continuation.py",
+      "sha256": "a088f26620f6e629770c06953969159573a6ec28ce0d3c36b5f6f78998ae29b9"
+    },
+    {
+      "path": "tools/test_roi_continuation.py",
+      "sha256": "af1adfc532a6338314b96441d639643eda41aee725e6c48fb9310d818b758611"
+    },
+    {
+      "path": "tools/test_roi_query.py",
+      "sha256": "9e3e0d640786720515b55e00bbc3370ea7068535cf42d6b22a296213eeb4655c"
+    },
+    {
+      "path": "tools/test_geometry_winner.py",
+      "sha256": "2bc9c5c4b7b1f6f5e3554b6a3b9f4db1122bd4d821c9b23a63a266d874bf906a"
+    },
+    {
+      "path": "tools/test_threshold_distribution.py",
+      "sha256": "08f015308ce2ddcd808f8ff849c841031b6770668ca3743fef34ec2d7e5db660"
+    },
+    {
+      "path": "tools/check_structure.py",
+      "sha256": "1fda13242ac2b3f40f8959d5c5623e3cf06f20e395ca5227aa362d4c483f93d2"
+    },
+    {
+      "path": "tools/verify_roi_threshold_migration.py",
+      "sha256": "9465ef0176d3acd2b87d60b087c63f789f95b2165a31979e14e175d4d34b4203"
+    },
+    {
+      "path": "RUN_F2_G1_CONTINUATION.md",
+      "sha256": "f8b077e6f63e265f032cc5d9821831874214cefbf7d12d24566a4ab2afb8d9c5"
+    }
+  ]
+}

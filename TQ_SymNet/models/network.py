@@ -10,7 +10,8 @@ from .light_quality import PooledQualityScorer
 @DETECTORS.register_module()
 class TQSymNet(RetinaNAMDetailSelector):
     def __init__(self, *args, diagnostics=True, oracle_interval=4,
-                 quality_arch='attention', selector_fusion_init=None, **kwargs):
+                 quality_arch='attention', selector_fusion_init=None,
+                 quality_pooled_mlp_hidden=None, **kwargs):
         if kwargs.get('selector_tb_fusion', 'max') != 'max':
             raise ValueError('This release retains MAX fusion, not LSE')
         if kwargs.get('selector_adaptive_subtype_gate', False):
@@ -19,10 +20,13 @@ class TQSymNet(RetinaNAMDetailSelector):
         if quality_arch not in ('attention', 'pooled'):
             raise ValueError('quality_arch must be attention or pooled')
         self.quality_arch = quality_arch
+        if quality_arch != 'pooled' and quality_pooled_mlp_hidden is not None:
+            raise ValueError('quality_pooled_mlp_hidden is only valid for pooled heads')
         if quality_arch == 'pooled':
             previous = self.candidate_quality
             with torch.random.fork_rng(devices=[]):
-                self.candidate_quality = PooledQualityScorer(previous.hidden, previous.chunk)
+                self.candidate_quality = PooledQualityScorer(
+                    previous.hidden, previous.chunk, mlp_hidden=quality_pooled_mlp_hidden)
             for parameter in self.candidate_quality.parameters():
                 parameter.requires_grad_(self.selector_quality_trainable)
             self.candidate_quality.fusion_gate_logit = torch.nn.Parameter(
@@ -91,7 +95,7 @@ class TQSymNetDebugHook(DetailSelectorDebugHook):
         runner.logger.info('[TQ-SYMNET-BUILD] id=%s masks=False H2=False '
             'mainFrozen=%s qualityTarget=%s rankScope=qualityOnly '
             'score=MAX-logit+quality alpha=%.6f texture=%s lbp=%s gabor=%s '
-            'gaussian=%s sideQuery=%s detail=%s qualityRank=%.3f selectorRank=%.3f '
+            'gaussian=%s sideQuery=%s detail=%s legacyQualityRankInactive=%.3f activeQualityRank=%.3f '
             'inferenceMode=%s oracleEvery=%d architecture=%s', model.integrated_build_id,
             model.quality_detach, model.selector_quality_target,
             float(alpha.detach()), model.candidate_quality.texture,
