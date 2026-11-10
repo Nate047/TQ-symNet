@@ -1,34 +1,46 @@
 # TQ-SymNet
 
-胸部X线肺结核病灶检测的独立 MMDetection 2.x 实现。主检测器采用
-TransNeXt / CrossScale / Sym，冻结后训练候选质量网络，并学习全局融合系数，
-在 Gaussian Soft-NMS 前融合亚型置信度与质量分。质量网络不修改候选坐标，
-推理不使用真实标注，也不需要肺部分割 mask。
+A standalone MMDetection 2.x implementation for tuberculosis (TB) lesion detection
+in chest radiographs. A TransNeXt/CrossScale/Sym detector generates candidates.
+With the detector frozen, a candidate-conditioned quality evaluator and a global
+fusion coefficient are trained to combine localization-quality evidence with
+subtype confidence before Gaussian Soft-NMS.
 
-本页只介绍论文主实验。历史消融与探索配置保留在仓库中，不属于下面的运行流程。
+The quality evaluator does not change box coordinates. Inference uses no ground-truth
+boxes and requires no lung segmentation masks. This README covers only the paper's
+main experiment. Historical ablation and exploratory configurations remain in the repository.
 
-## 主实验与结果
+## Main experiment
 
-- 检测队列：599张TB阳性训练图像 / 200张验证图像，902 / 309个框。
-- 质量网络：冻结同一M2检测器，训练8轮，按验证集整体TB AP选择checkpoint。
-- 最终模型：原质量读取结构 + 全阈值监督 + rank + 可学习融合系数。
-- 论文选定模型为质量训练第7轮，α约0.53571，验证AP/AP50/AP75为40.1/77.5/35.7。
-- 官方隐藏ALL测试AP/AP50/AP75为35.11/73.53/31.54，论文记录提交ID为1002246。
+- **Detection cohort:** 599 TB-positive training images / 200 validation images,
+  with 902 / 309 annotated boxes.
+- **Quality training:** eight epochs using the same frozen M2 detector.
+  Checkpoints are selected by category-agnostic validation TB AP.
+- **Final recipe:** the original quality reader, threshold-passing supervision,
+  within-lesion ranking, and a learned global fusion coefficient.
+- **Selected paper checkpoint:** quality epoch 7, alpha approximately 0.53571;
+  validation AP/AP50/AP75: **40.1/77.5/35.7**.
+- **Reported official hidden ALL results:** AP/AP50/AP75:
+  **35.11/73.53/31.54**; paper-recorded submission ID: **1002246**.
 
-本地验证集仅含TB阳性图像，不能与包含整图筛查的隐藏ALL分数直接比较。
-固定α控制、离线α扫描和最终可学习融合模型不是同一个实验。
-新训练需按自身验证结果选模，不能保证复现同一峰值或同一最佳轮次。
+The local validation cohort contains only TB-positive images; its scores are not
+directly comparable with hidden ALL scores, which also depend on image screening.
+The fixed-alpha control, offline alpha sweep, and separately trained learned-fusion
+model are different experiments. A new run must select its own checkpoint on
+validation AP; the same peak score or selected epoch is not guaranteed.
 
-## 1. 环境与文件准备
+## 1. Environment and required assets
 
-建议使用原Linux环境：Python 3.8、PyTorch 1.10、CUDA 11.3、兼容的torchvision、
-MMCV 1.7.1（含CUDA扩展）及timm。TransNeXt的swattention扩展需与PyTorch/CUDA匹配。
-requirements.txt不负责安装PyTorch、mmcv-full或编译CUDA算子，不要盲目升级已有环境。
+The historical environment is Linux, Python 3.8, PyTorch 1.10, CUDA 11.3,
+MMCV 1.7.1 with compiled CUDA extensions, and compatible torchvision and timm.
+TransNeXt's `swattention` extension must match the installed PyTorch/CUDA versions.
+`requirements.txt` does not install PyTorch or mmcv-full, or compile CUDA operators.
+Do not blindly upgrade an existing compatible environment.
 
 ```bash
 git clone https://github.com/Nate047/TQ-symNet.git
 cd TQ-symNet
-# 先激活已配置好的MMDetection 2.x环境
+# Activate your compatible MMDetection 2.x environment first.
 python -m pip install -r requirements.txt
 python -c "import mmdet; print(mmdet.__file__)"
 export CUDA_VISIBLE_DEVICES=0
@@ -36,34 +48,42 @@ export PYTHONHASHSEED=0
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 ```
 
-所有命令从仓库根目录执行；mmdet应指向本仓库。下面均为单卡运行。
+Run every command from the repository root. The printed `mmdet` path should point
+to this repository. All examples use one GPU.
 
-按TBX11K原始使用条款准备图像、检测标注及整图分类索引：
-`TBX11K_train_only_tb.json`、`TBX11K_val_only_tb.json`、
-`all_train.json`、`all_val.json`和无GT的`all_test.json`。
-整图分类还使用官方文件列表中的MC/Shenzhen及DA/DB补充图像。
+Obtain TBX11K images and annotations under their original data-use terms:
+`TBX11K_train_only_tb.json`, `TBX11K_val_only_tb.json`,
+`all_train.json`, `all_val.json`, and `all_test.json` without hidden annotations.
+Image screening also uses the MC/Shenzhen and DA/DB examples in the official file lists.
 
-修改以下位置的服务器示例路径，使其指向自己的文件：
+Update the example server paths to match your files:
 
-| 用途 | 路径设置位置 |
+| Asset | Configuration |
 |---|---|
-| 检测训练/验证图像和JSON | `configs/publication_alpha/_original_a0.py`中的`data`及初始化hook |
-| 冻结M2 checkpoint | 同文件中的`detector_checkpoint` |
-| C20分类数据和初始M2 | `configs/classification/c0_backbone_sym.py`，由C20配置继承 |
-| 官方测试图像索引 | `configs/publication_alpha/test_online_learned.py` |
+| Detector training/validation images and JSON files | `data` and initialization-hook paths in `configs/publication_alpha/_original_a0.py` |
+| Frozen M2 checkpoint | `detector_checkpoint` in the same file |
+| C20 screening data and initial M2 source | `configs/classification/c0_backbone_sym.py`, inherited by C20 |
+| Official test image index | `configs/publication_alpha/test_online_learned.py` |
 
-主实验要求原始M2第13轮checkpoint，默认放置于：
-`work_dirs/m2_s0/best_official_tb_bbox_mAP_epoch_13.pth`。
+The main experiment requires the original M2 epoch-13 checkpoint, expected at:
+`work_dirs/m2_s0/best_official_tb_bbox_mAP_epoch_13.pth`.
 
-其SHA-256为：
-`4c7ee5c68dc8dc10ee4fc938dad48404bbad6d3b67a6de3b3ea97756f6eaad74`。
+Expected SHA-256:
 
-初始化hook还核验训练/验证JSON哈希。可以修改文件位置，不应绕过内容校验后
-将不同队列或不同检测器的结果称为相同实验。
-当前以下流程从指定的冻结M2开始；仓库中的后续479/120/200检测训练配置
-不能替代原599/200实验的检测器重训流程。完整从头重训该历史M2仍需对应配置与资产核验。
+```text
+4c7ee5c68dc8dc10ee4fc938dad48404bbad6d3b67a6de3b3ea97756f6eaad74
+```
 
-## 2. 训练主质量网络
+The initialization hook also checks the training/validation JSON hashes.
+File locations may change, but do not bypass content checks and describe a different
+cohort or detector as the same experiment.
+
+**Starting point:** the workflow below starts from the specified frozen M2.
+The later 479/120/200 detector configurations are not replacements for the original
+599/200 experiment. Regenerating the historical M2 from scratch still requires
+verification of its corresponding training configuration and assets.
+
+## 2. Train the main quality evaluator
 
 ```bash
 python tools/train.py configs/publication_alpha/a1_learned.py \
@@ -71,12 +91,13 @@ python tools/train.py configs/publication_alpha/a1_learned.py \
   --work-dir work_dirs/publication_alpha/a1_learned_s0
 ```
 
-主检测器保持冻结，质量网络重新初始化，融合系数参与训练。
-不要复用其他实验的非空work-dir。训练种子及确定化设置不承诺CUDA逐位一致。
+The detector stays frozen, the quality evaluator is freshly initialized, and the
+fusion coefficient is trainable. Do not reuse another experiment's nonempty work
+directory. The seed and deterministic settings do not guarantee bitwise-identical CUDA runs.
 
-## 3. 本地验证
+## 3. Evaluate on local validation
 
-将QCKPT替换为本次训练按验证AP选出的实际文件：
+Replace `QCKPT` with the actual checkpoint selected by validation AP in your run:
 
 ```bash
 QCKPT=work_dirs/publication_alpha/a1_learned_s0/best_official_tb_bbox_mAP_epoch_7.pth
@@ -90,15 +111,19 @@ python tools/test.py configs/publication_alpha/a1_learned.py "$QCKPT" \
   --cfg-options model.inference_mode=subtype model.diagnostics=False
 ```
 
-使用主配置自带的验证索引，不改成后续自划分test。
-整体TB采用COCO IoU 0.50:0.05:0.95、类别无关匹配；不是两个亚型AP的平均值。
-分类别模式保留双亚型假设并逐类抑制，与整体TB输出上的argmax亚型结果分开报告。
-`tools/evaluate.py`绑定另一套split-contract流程，不作为上述原599/200主实验的入口。
+Keep the validation index supplied by the main configuration; do not substitute
+the later self-partitioned test set. Overall TB AP uses COCO IoU thresholds
+0.50:0.05:0.95 and category-agnostic matching. It is not the mean of subtype APs.
+Classwise inference retains both subtype hypotheses and suppresses them separately;
+report it separately from argmax subtype labels attached to overall-TB selections.
+`tools/evaluate.py` is tied to another split-contract workflow and is not the
+entry point for this original 599/200 experiment.
 
-## 4. 官方ALL测试的独立C20筛查器
+## 4. Train and export the independent C20 image classifier
 
-官方ALL输出需要真实的Healthy / Sick non-TB / TB整图分类概率。
-质量网络不是整图分类器。C20训练的是独立编码器副本，不改动检测器及质量网络权重。
+Official ALL evaluation requires genuine Healthy / Sick non-TB / TB image-level
+probabilities. The quality evaluator is not an image classifier. C20 fine-tunes
+an independent encoder copy without modifying the detector or quality-model weights.
 
 ```bash
 M2=work_dirs/m2_s0/best_official_tb_bbox_mAP_epoch_13.pth
@@ -114,11 +139,13 @@ python tools/export_classification.py \
   --out work_dirs/main_submission/TQSymNet.txt
 ```
 
-C20训练12轮，微批次2、累积4次，有效批次8；按验证准确率选模。
-导出会恢复该检查点的完整分类编码器，并生成概率TXT及来源manifest；
-必须保留它们，不能手动打乱图像顺序。
+C20 trains for 12 epochs with microbatch size 2 and four accumulation steps
+(effective batch size 8). Select its checkpoint by validation accuracy.
+Export restores the complete selected classifier, including its tuned encoder,
+and writes a probability TXT plus a provenance manifest. Keep both files and
+preserve the official image order.
 
-## 5. 导出最终检测结果
+## 5. Export the final hidden-test detections
 
 ```bash
 python tools/export_online.py \
@@ -128,30 +155,39 @@ python tools/export_online.py \
   --json-prefix work_dirs/main_submission/TQSymNet
 ```
 
-官方测试索引需包含全部3,302张图像，且不含隐藏GT。
-仅对C20预测为TB的图像导出检测。该命令只生成本地文件，不自动提交到平台。
-保存检测JSON、分类TXT、相关manifest及评分返回记录。
-最终模型只按验证集选择，不使用隐藏测试返回结果调参。
+The official index must include all 3,302 images without hidden ground truth.
+Detections are exported only for images classified as TB by C20.
+This command generates local files; it does not submit to the challenge platform.
+Archive the detection JSON, classification TXT, manifests, and returned scoring
+records. Select models on validation data, not hidden-test feedback.
 
-## 权重与公开提交记录
+## Model weights and submission records
 
-| 资产 | 公开状态 |
+| Asset | Availability |
 |---|---|
-| 主实验M2检测器checkpoint | 待提供真实权重后发布 |
-| 最终可学习融合质量模型checkpoint | 待提供真实权重后发布 |
-| 独立C20分类器checkpoint | 待提供真实权重后发布 |
-| 2026-10-19隐藏测试预测包 | [已公开：检测JSON和分类TXT](results/hidden_all_20261019/README.md) |
-| 官方评分回执/平台导出记录 | 待补充可公开的原始返回文件 |
+| Main M2 detector checkpoint | Pending release of the actual weight file |
+| Final learned-fusion quality checkpoint | Pending release of the actual weight file |
+| Independent C20 classifier checkpoint | Pending release of the actual weight file |
+| 2026-10-19 hidden-test predictions | [Available: detection JSON and classification TXT](results/hidden_all_20261019/README.md) |
+| Official scoring response / platform export | Pending publication of the original response |
 
-[下载预测包](results/hidden_all_20261019/TQSymNet_submission.zip)。
-它包含63,802个预测框（643张导出图像）和3,302行分类概率，不包含测试GT或模型权重。
-该包与归档导出的哈希一致，只证明文件身份；不能单独证明平台提交ID或独立复算隐藏分数。
-权重公开后将在此补充下载链接、对应配置和SHA-256，目前不提供占位或无效下载链接。
+[Download the prediction archive](results/hidden_all_20261019/TQSymNet_submission.zip).
+It contains 63,802 predicted boxes for 643 exported images and 3,302 rows of
+classification probabilities, not hidden annotations or model weights.
+Checksums establish file identity with the archived export; they do not independently
+verify a platform submission ID or reproduce its hidden score.
+Weight downloads, matching configurations, and SHA-256 values will be added after
+the actual files are provided. No placeholder download links are supplied.
 
-## 复现边界
+## Reproducibility notes
 
-数据与预训练资源须遵守各自许可。验证集用于选型与分析，局部结果具有选型依赖；
-图像级bootstrap不代表训练种子方差。仓库静态检查不等于完整CUDA训练验证。
-现有`coco.py`与旧`STANDALONE_SOURCE_MANIFEST.json`哈希不同，
-因此旧standalone检查会报告core drift；未通过重写哈希掩盖该差异。
-新运行应核验实际评测与论文协议一致。模型、配置及实现来源见[PROVENANCE.json](PROVENANCE.json)。
+Data and pretrained resources remain subject to their respective licenses.
+Validation supports both selection and analysis, so local results are
+selection-conditioned. Image-level bootstrap does not estimate training-seed
+variability. Static checks do not replace full CUDA runtime verification.
+
+The current `coco.py` differs from the legacy `STANDALONE_SOURCE_MANIFEST.json`
+hash, so the legacy standalone check reports core drift. The manifest has not
+been rewritten to hide that difference. Verify the actual evaluator against the
+paper protocol before treating new measurements as a reproduction.
+Implementation provenance is documented in [PROVENANCE.json](PROVENANCE.json).
