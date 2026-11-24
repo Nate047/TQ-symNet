@@ -68,15 +68,43 @@ Update the example server paths to match your files:
 The main experiment requires the original M2 epoch-13 checkpoint, expected at:
 `work_dirs/m2_s0/best_official_tb_bbox_mAP_epoch_13.pth`.
 
-Expected SHA-256:
-
-```text
-4c7ee5c68dc8dc10ee4fc938dad48404bbad6d3b67a6de3b3ea97756f6eaad74
-```
-
 The initialization hook also checks the training/validation JSON hashes.
 File locations may change, but do not bypass content checks and describe a different
 cohort or detector as the same experiment.
+
+### Download the released checkpoints
+
+The three original checkpoints are available in the
+[main-experiment release](https://github.com/Nate047/TQ-symNet/releases/tag/main-experiment-weights).
+From the repository root, download them to the locations used below:
+
+```bash
+mkdir -p work_dirs/m2_s0 work_dirs/publication_alpha/a1_learned_s0 work_dirs/c20_main_s0
+
+curl -fL --retry 3 \
+  "https://github.com/Nate047/TQ-symNet/releases/download/main-experiment-weights/best_official_tb_bbox_mAP_epoch_13.pth" \
+  -o work_dirs/m2_s0/best_official_tb_bbox_mAP_epoch_13.pth
+
+curl -fL --retry 3 \
+  "https://github.com/Nate047/TQ-symNet/releases/download/main-experiment-weights/best_official_tb_bbox_mAP_epoch_7.pth" \
+  -o work_dirs/publication_alpha/a1_learned_s0/best_official_tb_bbox_mAP_epoch_7.pth
+
+curl -fL --retry 3 \
+  "https://github.com/Nate047/TQ-symNet/releases/download/main-experiment-weights/best_cls_accuracy.pth" \
+  -o work_dirs/c20_main_s0/best_cls_accuracy.pth
+```
+
+Do not overwrite your own trained checkpoints at these paths. Use a different download
+directory and update the commands if those files already exist. To evaluate the released
+model, skip training and continue with Sections 3 and 5; for ALL export, first export
+the released C20 classifier as shown in Section 4. Use new, empty work directories when
+retraining, rather than the directories populated by these downloads.
+
+The release preserves the original PyTorch files, including saved training metadata
+and optimizer states. Approximate file sizes are 1,048.6 MB (M2), 332.0 MB (quality),
+and 440.0 MB (C20). Use the repository loading/export tools; the C20 snapshot is not a
+plain detector state_dict. No manual checksum calculation is required. Existing runtime
+provenance checks remain enabled.
 
 **Starting point:** the workflow below starts from the specified frozen M2.
 The later 479/120/200 detector configurations are not replacements for the original
@@ -165,9 +193,9 @@ records. Select models on validation data, not hidden-test feedback.
 
 | Asset | Availability |
 |---|---|
-| Main M2 detector checkpoint | Pending release of the actual weight file |
-| Final learned-fusion quality checkpoint | Pending release of the actual weight file |
-| Independent C20 classifier checkpoint | Pending release of the actual weight file |
+| Main M2 detector, epoch 13 | [Download](https://github.com/Nate047/TQ-symNet/releases/download/main-experiment-weights/best_official_tb_bbox_mAP_epoch_13.pth) |
+| Final learned-fusion quality model, epoch 7 | [Download](https://github.com/Nate047/TQ-symNet/releases/download/main-experiment-weights/best_official_tb_bbox_mAP_epoch_7.pth) |
+| Independent C20 classifier, epoch 11 | [Download](https://github.com/Nate047/TQ-symNet/releases/download/main-experiment-weights/best_cls_accuracy.pth) |
 | 2026-10-19 hidden-test predictions | [Available: detection JSON and classification TXT](results/hidden_all_20261019/README.md) |
 | Official scoring response / platform export | Pending publication of the original response |
 
@@ -176,8 +204,12 @@ It contains 63,802 predicted boxes for 643 exported images and 3,302 rows of
 classification probabilities, not hidden annotations or model weights.
 Checksums establish file identity with the archived export; they do not independently
 verify a platform submission ID or reproduce its hidden score.
-Weight downloads, matching configurations, and SHA-256 values will be added after
-the actual files are provided. No placeholder download links are supplied.
+The released quality checkpoint includes both the frozen detector and quality evaluator,
+including the learned alpha. Its 1,382 backbone/neck/head state entries were checked
+against the supplied M2 file and match exactly. C20 metadata identifies the same M2
+as its initialization source and includes the tuned classifier backbone and neck.
+These checks establish checkpoint consistency, not a new CUDA inference run or an
+independent reproduction of the archived hidden-test predictions.
 
 ## Reproducibility notes
 

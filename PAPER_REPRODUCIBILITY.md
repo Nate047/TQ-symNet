@@ -18,8 +18,10 @@ validation checkpoint, not a guarantee that another training run will reproduce 
   `configs/publication_alpha/_original_a0.py`, or edit those paths to match your system.
 - Obtain the ImageNet-pretrained TransNeXt-Small weights for detector training,
   the original frozen M2 detector checkpoint (epoch 13), and the independent
-  image-classifier checkpoint for the hidden-test export. These files, datasets,
-  submission predictions and GPU-built binaries are **not included** in this repository.
+  image-classifier checkpoint for the hidden-test export. The three main model checkpoints are available as GitHub Release assets; see the
+  [README](README.md#model-weights-and-submission-records) for downloads. Images,
+  annotations and GPU-built binaries are not bundled. Archived submission predictions
+  are available under results/hidden_all_20261019.
 - The original-cohort initialization hook checks the exact detector and annotation
   SHA-256 values in `_original_a0.py`. Moving files is permitted; changing their
   contents fails the check. Do not bypass hashes and report the run as the same
@@ -61,15 +63,11 @@ the offline alpha sweep's 40.05 AP are not the separately trained 40.1 model.
 
 ## 3. Evaluate on local validation
 
-```bash
-QCKPT=work_dirs/publication_alpha/a1_learned_s0/best_official_tb_bbox_mAP_epoch_7.pth
-CUDA_VISIBLE_DEVICES=0 python tools/evaluate.py \
-  configs/publication_alpha/a1_learned.py "$QCKPT" \
-  --mode tb --out-dir work_dirs/publication_alpha/a1_learned_s0/eval_tb --diagnostics
-CUDA_VISIBLE_DEVICES=0 python tools/evaluate.py \
-  configs/publication_alpha/a1_learned.py "$QCKPT" \
-  --mode subtype --out-dir work_dirs/publication_alpha/a1_learned_s0/eval_subtype
-```
+Use the current original-cohort evaluation commands in [README](README.md#3-evaluate-on-local-validation).
+The split-contract-based tools/evaluate.py command previously listed here belongs to
+another cohort and must not be used for the original 599/200 experiment.
+
+
 
 Change `QCKPT` to the actual selected file. Pooled TB AP uses COCO IoUs
 0.50:0.05:0.95 and category-agnostic matching; it is not the mean of subtype APs.
