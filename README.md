@@ -51,7 +51,9 @@ export CUBLAS_WORKSPACE_CONFIG=:4096:8
 Run every command from the repository root. The printed `mmdet` path should point
 to this repository. All examples use one GPU.
 
-Obtain TBX11K images and annotations under their original data-use terms:
+**Dataset download:** We obtained the TBX11K data from the [TBX 11 mirror on Kaggle (usmanshams/tbx-11)](https://www.kaggle.com/datasets/usmanshams/tbx-11). See the [original TBX11K project](https://mmcheng.net/tb/) for attribution and the official challenge. The mirror is a download source, not the definition of the paper split or a source of hidden-test labels.
+
+Prepare the images and these annotation/index files under the original data-use terms:
 `TBX11K_train_only_tb.json`, `TBX11K_val_only_tb.json`,
 `all_train.json`, `all_val.json`, and `all_test.json` without hidden annotations.
 Image screening also uses the MC/Shenzhen and DA/DB examples in the official file lists.

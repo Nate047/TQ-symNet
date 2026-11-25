@@ -79,7 +79,7 @@ The validation set also selects checkpoints, so those results are selection-cond
 The official online test is scored on ALL; no separate Only-TB result is available
 for the current submission. The image-level Healthy/Sick/TB classifier is a
 separate network. The quality scorer is **not** that classifier. Train/export the
-independent C20 classifier using `RUN_CLASSIFICATION_ORIGINAL_SYM.md`, including
+independent C20 classifier using the [main README, Section 4](README.md#4-train-and-export-the-independent-c20-image-classifier), including
 its matching image index and provenance manifest. Then use the quality checkpoint
 and matching classifier TXT with `configs/publication_alpha/test_online_learned.py`.
 See `tools/export_online.py --help` for `--classification-txt`, `--cls-filter`,
